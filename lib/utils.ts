@@ -161,10 +161,13 @@ export function getDayLabel(dateStr: string): string {
 }
 
 export function formatDateFull(dateStr: string): string {
+  if (!dateStr) return "";
   const d = new Date(dateStr + "T00:00:00");
+  // Use explicit "en-US" + UTC timeZone so server and client render identically
   return d.toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
+    timeZone: "UTC",
   });
 }

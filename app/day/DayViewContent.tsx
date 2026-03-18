@@ -49,8 +49,12 @@ function confirmClear(section: string): boolean {
 export default function DayViewContent() {
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
-  const today = new Date().toISOString().slice(0, 10);
-  const activeDate = dateParam || today;
+  // Compute today client-side only to avoid SSR/client date mismatch
+  const [today, setToday] = useState("");
+  useEffect(() => {
+    setToday(new Date().toISOString().slice(0, 10));
+  }, []);
+  const activeDate = dateParam || today || new Date().toISOString().slice(0, 10);
 
   const [dayData, setDayData] = useState<DayData>(EMPTY_DAY(activeDate));
   const [saving, setSaving] = useState(false);
@@ -222,10 +226,10 @@ export default function DayViewContent() {
             </motion.button>
           </Link>
           <div className="flex-1">
-            <h1 className="text-lg font-extrabold text-gray-900 leading-tight">
+            <h1 className="text-lg font-extrabold text-gray-900 leading-tight" suppressHydrationWarning>
               {formatDateFull(activeDate)}
             </h1>
-            {activeDate === today && (
+            {today && activeDate === today && (
               <span className="text-xs font-bold text-pink-500">Today</span>
             )}
           </div>
@@ -261,7 +265,7 @@ export default function DayViewContent() {
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1 -mx-1 px-1">
           {weekDates.map((date) => {
             const isActive = date === activeDate;
-            const isToday = date === today;
+            const isToday = today && date === today;
             const dayNum = new Date(date + "T00:00:00").getDate();
             const dayLabel = getDayLabel(date);
             return (
