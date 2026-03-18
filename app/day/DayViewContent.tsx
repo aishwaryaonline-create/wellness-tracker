@@ -49,7 +49,20 @@ async function patchSection(date: string, fields: Partial<DayData>): Promise<{ i
     body: JSON.stringify({ date, ...fields }),
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || "Save failed");
+  if (!res.ok) {
+    // Include Notion error code if present for easier debugging
+    const detail = json.detail;
+    const msg = [
+      json.error || "Save failed",
+      detail?.notionCode ? `[${detail.notionCode}]` : null,
+      detail?.notionBody?.message && detail.notionBody.message !== json.error
+        ? detail.notionBody.message
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    throw new Error(msg);
+  }
   return json.data ?? {};
 }
 
@@ -82,6 +95,9 @@ export default function DayViewContent() {
   const [fastingSaveStatus, setFastingSaveStatus] = useState<SectionSaveStatus>("idle");
   const [habitsSaveStatus, setHabitsSaveStatus] = useState<SectionSaveStatus>("idle");
   const [mealsSaveStatus, setMealsSaveStatus] = useState<SectionSaveStatus>("idle");
+
+  // ── Save error messages (shown in a banner) ──────────────────────────────────
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const weekDates = getWeekDates(new Date(activeDate + "T00:00:00"));
 
@@ -214,8 +230,9 @@ export default function DayViewContent() {
       setDirtyFasting(false);
       setFastingSaveStatus("saved");
       setTimeout(() => setFastingSaveStatus("idle"), 2000);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Fasting save error:", err);
+      setSaveError(err.message || "Fasting save failed");
       setFastingSaveStatus("error");
       setTimeout(() => setFastingSaveStatus("idle"), 3000);
     }
@@ -247,8 +264,9 @@ export default function DayViewContent() {
       setDirtyHabits(false);
       setHabitsSaveStatus("saved");
       setTimeout(() => setHabitsSaveStatus("idle"), 2000);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Habits save error:", err);
+      setSaveError(err.message || "Habits save failed");
       setHabitsSaveStatus("error");
       setTimeout(() => setHabitsSaveStatus("idle"), 3000);
     }
@@ -276,8 +294,9 @@ export default function DayViewContent() {
       setDirtyMeals(false);
       setMealsSaveStatus("saved");
       setTimeout(() => setMealsSaveStatus("idle"), 2000);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Meals save error:", err);
+      setSaveError(err.message || "Meals save failed");
       setMealsSaveStatus("error");
       setTimeout(() => setMealsSaveStatus("idle"), 3000);
     }
@@ -295,7 +314,8 @@ export default function DayViewContent() {
       await patchSection(activeDate, { firstMealTime: "", lastMealTime: "" });
       setFastingSaveStatus("saved");
       setTimeout(() => setFastingSaveStatus("idle"), 1500);
-    } catch {
+    } catch (err: any) {
+      setSaveError(err.message || "Clear fasting failed");
       setFastingSaveStatus("error");
       setTimeout(() => setFastingSaveStatus("idle"), 3000);
     }
@@ -324,7 +344,8 @@ export default function DayViewContent() {
       await patchSection(activeDate, cleared);
       setHabitsSaveStatus("saved");
       setTimeout(() => setHabitsSaveStatus("idle"), 1500);
-    } catch {
+    } catch (err: any) {
+      setSaveError(err.message || "Clear habits failed");
       setHabitsSaveStatus("error");
       setTimeout(() => setHabitsSaveStatus("idle"), 3000);
     }
@@ -342,7 +363,8 @@ export default function DayViewContent() {
       await patchSection(activeDate, cleared);
       setMealsSaveStatus("saved");
       setTimeout(() => setMealsSaveStatus("idle"), 1500);
-    } catch {
+    } catch (err: any) {
+      setSaveError(err.message || "Clear meals failed");
       setMealsSaveStatus("error");
       setTimeout(() => setMealsSaveStatus("idle"), 3000);
     }
@@ -427,6 +449,27 @@ export default function DayViewContent() {
             );
           })}
         </div>
+
+        {/* Save error banner */}
+        {saveError && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-3 px-4 py-3 rounded-xl bg-red-50 border border-red-200 flex items-start gap-2"
+          >
+            <span className="text-red-500 text-sm leading-none mt-0.5">⚠</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-red-700 mb-0.5">Save failed</p>
+              <p className="text-xs text-red-600 break-words">{saveError}</p>
+            </div>
+            <button
+              onClick={() => setSaveError(null)}
+              className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
+            >
+              ×
+            </button>
+          </motion.div>
+        )}
 
         {loading ? (
           <div className="space-y-4">
