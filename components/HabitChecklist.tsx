@@ -78,7 +78,6 @@ const HABITS: HabitDef[] = [
   },
 ];
 
-// Group consecutive habits with the same label for visual grouping
 const GROUPS = [
   { label: "Morning", keys: ["morningRitual"] },
   {
@@ -97,9 +96,10 @@ interface Props {
   data: Partial<DayData>;
   mealCount: 1 | 2 | 3;
   onChange: (key: keyof DayData, val: boolean) => void;
+  onClear: () => void;
 }
 
-export default function HabitChecklist({ data, mealCount, onChange }: Props) {
+export default function HabitChecklist({ data, mealCount, onChange, onClear }: Props) {
   const visible = (h: HabitDef) =>
     h.minMeals === undefined || mealCount >= h.minMeals;
 
@@ -119,10 +119,17 @@ export default function HabitChecklist({ data, mealCount, onChange }: Props) {
       <div className="flex items-center gap-2 mb-4">
         <span className="text-xl">✅</span>
         <h3 className="text-base font-bold text-gray-800">Daily Habits</h3>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-pink-50 text-pink-600">
             {checked}/{total}
           </span>
+          <motion.button
+            whileTap={{ scale: 0.93 }}
+            onClick={onClear}
+            className="text-[11px] font-semibold text-gray-400 hover:text-red-400 px-2.5 py-1 rounded-full border border-gray-200 hover:border-red-200 transition-all duration-150"
+          >
+            Clear
+          </motion.button>
         </div>
       </div>
 

@@ -19,6 +19,16 @@ export function calcEatWindowHours(firstMeal: string, lastMeal: string): number 
   return Math.round((mins / 60) * 10) / 10;
 }
 
+/** Hours between previous day's last meal and today's first meal (crosses midnight). */
+export function calcOvernightFastHours(prevLastMeal: string, todayFirstMeal: string): number {
+  if (!prevLastMeal || !todayFirstMeal) return 0;
+  const [lH, lM] = prevLastMeal.split(":").map(Number);
+  const [fH, fM] = todayFirstMeal.split(":").map(Number);
+  const minsToMidnight = 24 * 60 - (lH * 60 + lM);
+  const minsFromMidnight = fH * 60 + fM;
+  return Math.round(((minsToMidnight + minsFromMidnight) / 60) * 10) / 10;
+}
+
 export function getFastRating(fastHours: number): string {
   if (fastHours >= 18) return "Excellent";
   if (fastHours >= 16) return "Great";
@@ -70,8 +80,10 @@ export function totalHabitCount(mealCount: 1 | 2 | 3): number {
  *   Meal quality   — 30 pts  (AI score 1-10 → 0-30)
  *   Habits         — 20 pts  (completion rate × 20)
  */
-export function calcWellnessScore(day: DayData): WellnessScoreBreakdown {
-  const fastHours = calcFastHours(day.firstMealTime, day.lastMealTime);
+export function calcWellnessScore(day: DayData, overnightFastHours = 0): WellnessScoreBreakdown {
+  const sameDayFastHours = calcFastHours(day.firstMealTime, day.lastMealTime);
+  // Prefer overnight fast (crosses midnight) when available, else use same-day estimate
+  const fastHours = overnightFastHours > 0 ? overnightFastHours : sameDayFastHours;
   const eatHours = calcEatWindowHours(day.firstMealTime, day.lastMealTime);
   const aiScore = day.analysisJson?.score ?? null;
   const hasFastData = fastHours > 0;

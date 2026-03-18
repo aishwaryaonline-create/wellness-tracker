@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 const SYSTEM_PROMPT = `You are an expert Ayurvedic nutritionist specializing in Kapha dosha management, metabolic health, and traditional Indian medicine.
 
@@ -39,26 +39,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const stream = client.messages.stream({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `Please analyze my meals for today:\n\n${mealLog}`,
-        },
-      ],
+    // Fetch available models and pick the first that supports generateContent
+    const modelsRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`
+    );
+    const modelsData = await modelsRes.json();
+    console.log("Available Gemini models:", modelsData.models?.map((m: any) => m.name));
+
+    const availableModel = modelsData.models?.find((m: any) =>
+      m.supportedGenerationMethods?.includes("generateContent")
+    );
+    const modelName = availableModel?.name?.replace("models/", "") ?? "gemini-1.5-flash-latest";
+    console.log("Using model:", modelName);
+
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      systemInstruction: SYSTEM_PROMPT,
     });
 
-    const response = await stream.finalMessage();
+    const result = await model.generateContent(
+      `Please analyze my meals for today:\n\n${mealLog}`
+    );
 
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      throw new Error("No text response from AI");
-    }
+    const raw = result.response.text().trim();
 
-    const raw = textBlock.text.trim();
     // Extract JSON if wrapped in markdown code blocks
     const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
     const jsonStr = jsonMatch[1].trim();

@@ -14,7 +14,7 @@ interface ComponentRow {
 interface Props {
   score: WellnessScoreBreakdown;
   saving?: boolean;
-  saveStatus?: "idle" | "saved" | "error";
+  saveStatus?: "idle" | "saving" | "saved" | "error";
 }
 
 function ScoreBar({ pts, max, color }: { pts: number; max: number; color: string }) {

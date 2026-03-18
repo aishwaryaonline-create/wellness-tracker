@@ -51,6 +51,7 @@ interface Props {
   onMealChange: (field: MealField, val: string) => void;
   onMealCountChange: (val: 1 | 2 | 3) => void;
   onAnalysis: (result: AyurvedaAnalysis) => void;
+  onClear: () => void;
 }
 
 export default function MealLogger({
@@ -63,11 +64,11 @@ export default function MealLogger({
   onMealChange,
   onMealCountChange,
   onAnalysis,
+  onClear,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Ensure mealCount is always a valid number (guards against null from Notion)
   const count: 1 | 2 | 3 = (mealCount === 1 || mealCount === 2 || mealCount === 3) ? mealCount : 2;
 
   const values: Record<MealField, string> = { meal1, meal2, meal3, snacks };
@@ -133,7 +134,7 @@ export default function MealLogger({
       <div className="flex items-center gap-2 mb-4">
         <span className="text-xl">🍱</span>
         <h3 className="text-base font-bold text-gray-800">Meals Today</h3>
-        <div className="ml-auto flex gap-1.5">
+        <div className="ml-auto flex items-center gap-1.5">
           {([1, 2, 3] as const).map((n) => (
             <motion.button
               key={n}
@@ -151,6 +152,13 @@ export default function MealLogger({
               {n}
             </motion.button>
           ))}
+          <motion.button
+            whileTap={{ scale: 0.93 }}
+            onClick={onClear}
+            className="ml-1 text-[11px] font-semibold text-gray-400 hover:text-red-400 px-2.5 py-1 rounded-full border border-gray-200 hover:border-red-200 transition-all duration-150"
+          >
+            Clear
+          </motion.button>
         </div>
       </div>
 
