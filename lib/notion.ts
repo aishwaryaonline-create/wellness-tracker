@@ -36,10 +36,10 @@ function mapPage(page: any, fallbackDate: string): DayData {
     morningRitual: getCheckbox(p, "Morning Ritual"),
     kashayamMorning: getCheckbox(p, "Kashayam Morning"),
     kashayamEvening: getCheckbox(p, "Kashayam Evening"),
-    weightLossTabletMorning: getCheckbox(p, "Weight Loss Tablet Morning"),
-    weightLossTabletEvening: getCheckbox(p, "Weight Loss Tablet Evening"),
-    spirulinaMorning: getCheckbox(p, "Spirulina Morning"),
-    spirulinaEvening: getCheckbox(p, "Spirulina Evening"),
+    wellnessTabletMorning: getCheckbox(p, "Wellness Tablet Morning"),
+    wellnessTabletEvening: getCheckbox(p, "Wellness Tablet Evening"),
+    greenSupplementMorning: getCheckbox(p, "Green Supplement Morning"),
+    greenSupplementEvening: getCheckbox(p, "Green Supplement Evening"),
     psylliumHuskMorning: getCheckbox(p, "Psyllium Husk Morning"),
     psylliumHuskEvening: getCheckbox(p, "Psyllium Husk Evening"),
     triphalaChurnam: getCheckbox(p, "Triphala Churnam"),
@@ -66,10 +66,10 @@ function buildProperties(fields: Partial<DayData>): Record<string, any> {
   if (fields.morningRitual !== undefined) props["Morning Ritual"] = cb(fields.morningRitual);
   if (fields.kashayamMorning !== undefined) props["Kashayam Morning"] = cb(fields.kashayamMorning);
   if (fields.kashayamEvening !== undefined) props["Kashayam Evening"] = cb(fields.kashayamEvening);
-  if (fields.weightLossTabletMorning !== undefined) props["Weight Loss Tablet Morning"] = cb(fields.weightLossTabletMorning);
-  if (fields.weightLossTabletEvening !== undefined) props["Weight Loss Tablet Evening"] = cb(fields.weightLossTabletEvening);
-  if (fields.spirulinaMorning !== undefined) props["Spirulina Morning"] = cb(fields.spirulinaMorning);
-  if (fields.spirulinaEvening !== undefined) props["Spirulina Evening"] = cb(fields.spirulinaEvening);
+  if (fields.wellnessTabletMorning !== undefined) props["Wellness Tablet Morning"] = cb(fields.wellnessTabletMorning);
+  if (fields.wellnessTabletEvening !== undefined) props["Wellness Tablet Evening"] = cb(fields.wellnessTabletEvening);
+  if (fields.greenSupplementMorning !== undefined) props["Green Supplement Morning"] = cb(fields.greenSupplementMorning);
+  if (fields.greenSupplementEvening !== undefined) props["Green Supplement Evening"] = cb(fields.greenSupplementEvening);
   if (fields.psylliumHuskMorning !== undefined) props["Psyllium Husk Morning"] = cb(fields.psylliumHuskMorning);
   if (fields.psylliumHuskEvening !== undefined) props["Psyllium Husk Evening"] = cb(fields.psylliumHuskEvening);
   if (fields.triphalaChurnam !== undefined) props["Triphala Churnam"] = cb(fields.triphalaChurnam);

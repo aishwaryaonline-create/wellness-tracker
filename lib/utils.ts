@@ -44,10 +44,10 @@ function getActiveHabits(day: DayData): boolean[] {
     day.morningRitual,
     day.kashayamMorning,
     ...(mc >= 2 ? [day.kashayamEvening] : []),
-    day.weightLossTabletMorning,
-    ...(mc >= 2 ? [day.weightLossTabletEvening] : []),
-    day.spirulinaMorning,
-    ...(mc >= 2 ? [day.spirulinaEvening] : []),
+    day.wellnessTabletMorning,
+    ...(mc >= 2 ? [day.wellnessTabletEvening] : []),
+    day.greenSupplementMorning,
+    ...(mc >= 2 ? [day.greenSupplementEvening] : []),
     day.psylliumHuskMorning,
     day.psylliumHuskEvening,
     day.triphalaChurnam,
@@ -69,7 +69,7 @@ export function calcHabitScore(day: DayData): number {
 /** Total active habit count. Medicines only scale up to 2 meals. */
 export function totalHabitCount(mealCount: 1 | 2 | 3): number {
   const medicineCount = Math.min(mealCount, 2);
-  // morningRitual(1) + kashayam×mc + wlTablet×mc + spirulina×mc + psylliumX2(2) + triphala(1)
+  // morningRitual(1) + kashayam×mc + wellnessTablet×mc + greenSupplement×mc + psylliumX2(2) + triphala(1)
   return 1 + medicineCount + medicineCount + medicineCount + 2 + 1;
 }
 

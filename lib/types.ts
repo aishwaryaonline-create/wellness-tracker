@@ -6,12 +6,12 @@ export interface DayData {
   // Kashayam (scales with meal count)
   kashayamMorning: boolean;   // Meal 1
   kashayamEvening: boolean;   // Meal 2
-  // Weight Loss Tablet (scales with meal count)
-  weightLossTabletMorning: boolean;  // Meal 1
-  weightLossTabletEvening: boolean;  // Meal 2
-  // Spirulina (scales with meal count)
-  spirulinaMorning: boolean;  // Meal 1
-  spirulinaEvening: boolean;  // Meal 2
+  // Wellness Tablet (scales with meal count)
+  wellnessTabletMorning: boolean;  // Meal 1
+  wellnessTabletEvening: boolean;  // Meal 2
+  // Green Supplement (scales with meal count)
+  greenSupplementMorning: boolean;  // Meal 1
+  greenSupplementEvening: boolean;  // Meal 2
   // Fixed habits
   psylliumHuskMorning: boolean;
   psylliumHuskEvening: boolean;
