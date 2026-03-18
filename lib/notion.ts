@@ -6,7 +6,6 @@ const DATABASE_ID = process.env.NOTION_DATABASE_ID!;
 
 const cb = (val: boolean) => ({ checkbox: val });
 const rt = (val: string) => {
-  // Notion rich_text blocks have a 2000 char limit
   const content = (val || "").slice(0, 1990);
   return { rich_text: [{ text: { content } }] };
 };
@@ -56,6 +55,42 @@ function mapPage(page: any, fallbackDate: string): DayData {
   };
 }
 
+/** Build a Notion properties object from only the fields present in the patch. */
+function buildProperties(fields: Partial<DayData>): Record<string, any> {
+  const props: Record<string, any> = {};
+
+  if (fields.date !== undefined) {
+    props["Column Name"] = { title: [{ text: { content: fields.date } }] };
+    props["Date"] = dateprop(fields.date);
+  }
+  if (fields.morningRitual !== undefined) props["Morning Ritual"] = cb(fields.morningRitual);
+  if (fields.kashayamMorning !== undefined) props["Kashayam Morning"] = cb(fields.kashayamMorning);
+  if (fields.kashayamEvening !== undefined) props["Kashayam Evening"] = cb(fields.kashayamEvening);
+  if (fields.weightLossTabletMorning !== undefined) props["Weight Loss Tablet Morning"] = cb(fields.weightLossTabletMorning);
+  if (fields.weightLossTabletEvening !== undefined) props["Weight Loss Tablet Evening"] = cb(fields.weightLossTabletEvening);
+  if (fields.spirulinaMorning !== undefined) props["Spirulina Morning"] = cb(fields.spirulinaMorning);
+  if (fields.spirulinaEvening !== undefined) props["Spirulina Evening"] = cb(fields.spirulinaEvening);
+  if (fields.psylliumHuskMorning !== undefined) props["Psyllium Husk Morning"] = cb(fields.psylliumHuskMorning);
+  if (fields.psylliumHuskEvening !== undefined) props["Psyllium Husk Evening"] = cb(fields.psylliumHuskEvening);
+  if (fields.triphalaChurnam !== undefined) props["Triphala Churnam"] = cb(fields.triphalaChurnam);
+  if (fields.mealCount !== undefined) props["Meal Count"] = num(parseMealCount(fields.mealCount));
+  if (fields.firstMealTime !== undefined) props["First Meal Time"] = rt(fields.firstMealTime);
+  if (fields.lastMealTime !== undefined) props["Last Meal Time"] = rt(fields.lastMealTime);
+  if (fields.meal1 !== undefined) props["Meal 1"] = rt(fields.meal1);
+  if (fields.meal2 !== undefined) props["Meal 2"] = rt(fields.meal2);
+  if (fields.meal3 !== undefined) props["Meal 3"] = rt(fields.meal3);
+  if (fields.snacks !== undefined) props["Snacks"] = rt(fields.snacks);
+  if ("analysisJson" in fields) {
+    const analysisStr = fields.analysisJson
+      ? JSON.stringify(fields.analysisJson).slice(0, 1990)
+      : "";
+    props["Analysis JSON"] = rt(analysisStr);
+  }
+  if (fields.wellnessScore !== undefined) props["Wellness Score"] = num(fields.wellnessScore ?? 0);
+
+  return props;
+}
+
 export async function getDayData(d: string): Promise<DayData | null> {
   const res = await notion.databases.query({
     database_id: DATABASE_ID,
@@ -65,39 +100,14 @@ export async function getDayData(d: string): Promise<DayData | null> {
   return mapPage(res.results[0], d);
 }
 
+/** Full upsert — creates or replaces the entire day record. */
 export async function upsertDayData(data: DayData): Promise<DayData> {
   const existing = await notion.databases.query({
     database_id: DATABASE_ID,
     filter: { property: "Date", date: { equals: data.date } },
   });
 
-  const analysisStr = data.analysisJson
-    ? JSON.stringify(data.analysisJson).slice(0, 1990)
-    : "";
-
-  const properties: Record<string, any> = {
-    "Column Name": { title: [{ text: { content: data.date } }] },
-    Date: dateprop(data.date),
-    "Morning Ritual": cb(data.morningRitual),
-    "Kashayam Morning": cb(data.kashayamMorning),
-    "Kashayam Evening": cb(data.kashayamEvening),
-    "Weight Loss Tablet Morning": cb(data.weightLossTabletMorning),
-    "Weight Loss Tablet Evening": cb(data.weightLossTabletEvening),
-    "Spirulina Morning": cb(data.spirulinaMorning),
-    "Spirulina Evening": cb(data.spirulinaEvening),
-    "Psyllium Husk Morning": cb(data.psylliumHuskMorning),
-    "Psyllium Husk Evening": cb(data.psylliumHuskEvening),
-    "Triphala Churnam": cb(data.triphalaChurnam),
-    "Meal Count": num(parseMealCount(data.mealCount)),
-    "First Meal Time": rt(data.firstMealTime),
-    "Last Meal Time": rt(data.lastMealTime),
-    "Meal 1": rt(data.meal1),
-    "Meal 2": rt(data.meal2),
-    "Meal 3": rt(data.meal3),
-    "Snacks": rt(data.snacks),
-    "Analysis JSON": rt(analysisStr),
-    "Wellness Score": num(data.wellnessScore ?? 0),
-  };
+  const properties = buildProperties(data);
 
   if (existing.results.length > 0) {
     const page = await notion.pages.update({
@@ -112,6 +122,42 @@ export async function upsertDayData(data: DayData): Promise<DayData> {
     });
     return { ...data, id: page.id };
   }
+}
+
+/**
+ * Partial update — only touches the fields you pass.
+ * Other fields in Notion are left completely unchanged.
+ */
+export async function patchDayData(
+  date: string,
+  fields: Partial<DayData>
+): Promise<DayData> {
+  const existing = await notion.databases.query({
+    database_id: DATABASE_ID,
+    filter: { property: "Date", date: { equals: date } },
+  });
+
+  const properties = buildProperties(fields);
+
+  if (existing.results.length > 0) {
+    await notion.pages.update({
+      page_id: existing.results[0].id,
+      properties,
+    });
+  } else {
+    // First time saving this day — create the row with date + patched fields
+    await notion.pages.create({
+      parent: { database_id: DATABASE_ID },
+      properties: {
+        "Column Name": { title: [{ text: { content: date } }] },
+        Date: dateprop(date),
+        ...properties,
+      },
+    });
+  }
+
+  const updated = await getDayData(date);
+  return updated!;
 }
 
 export async function getWeekData(startDate: string, endDate: string): Promise<DayData[]> {

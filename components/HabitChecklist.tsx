@@ -3,79 +3,27 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { DayData } from "@/lib/types";
 import { totalHabitCount } from "@/lib/utils";
+import { SectionSaveStatus } from "@/app/day/DayViewContent";
 
 interface HabitDef {
   key: keyof DayData;
   label: string;
   subtitle: string;
   icon: string;
-  minMeals?: 2; // only shown when mealCount >= this
+  minMeals?: 2;
 }
 
 const HABITS: HabitDef[] = [
-  {
-    key: "morningRitual",
-    label: "Morning Ritual",
-    subtitle: "Oil pull, tongue scrape, warm water",
-    icon: "🌅",
-  },
-  {
-    key: "kashayamMorning",
-    label: "Kashayam",
-    subtitle: "Meal 1",
-    icon: "🌿",
-  },
-  {
-    key: "kashayamEvening",
-    label: "Kashayam",
-    subtitle: "Meal 2",
-    icon: "🌿",
-    minMeals: 2,
-  },
-  {
-    key: "weightLossTabletMorning",
-    label: "Weight Loss Tablet",
-    subtitle: "Meal 1",
-    icon: "💊",
-  },
-  {
-    key: "weightLossTabletEvening",
-    label: "Weight Loss Tablet",
-    subtitle: "Meal 2",
-    icon: "💊",
-    minMeals: 2,
-  },
-  {
-    key: "spirulinaMorning",
-    label: "Spirulina",
-    subtitle: "Meal 1",
-    icon: "🟢",
-  },
-  {
-    key: "spirulinaEvening",
-    label: "Spirulina",
-    subtitle: "Meal 2",
-    icon: "🟢",
-    minMeals: 2,
-  },
-  {
-    key: "psylliumHuskMorning",
-    label: "Psyllium Husk",
-    subtitle: "Morning",
-    icon: "🌾",
-  },
-  {
-    key: "psylliumHuskEvening",
-    label: "Psyllium Husk",
-    subtitle: "Evening",
-    icon: "🌾",
-  },
-  {
-    key: "triphalaChurnam",
-    label: "Triphala Churnam",
-    subtitle: "Before sleep at night",
-    icon: "🍃",
-  },
+  { key: "morningRitual", label: "Morning Ritual", subtitle: "Oil pull, tongue scrape, warm water", icon: "🌅" },
+  { key: "kashayamMorning", label: "Kashayam", subtitle: "Meal 1", icon: "🌿" },
+  { key: "kashayamEvening", label: "Kashayam", subtitle: "Meal 2", icon: "🌿", minMeals: 2 },
+  { key: "weightLossTabletMorning", label: "Weight Loss Tablet", subtitle: "Meal 1", icon: "💊" },
+  { key: "weightLossTabletEvening", label: "Weight Loss Tablet", subtitle: "Meal 2", icon: "💊", minMeals: 2 },
+  { key: "spirulinaMorning", label: "Spirulina", subtitle: "Meal 1", icon: "🟢" },
+  { key: "spirulinaEvening", label: "Spirulina", subtitle: "Meal 2", icon: "🟢", minMeals: 2 },
+  { key: "psylliumHuskMorning", label: "Psyllium Husk", subtitle: "Morning", icon: "🌾" },
+  { key: "psylliumHuskEvening", label: "Psyllium Husk", subtitle: "Evening", icon: "🌾" },
+  { key: "triphalaChurnam", label: "Triphala Churnam", subtitle: "Before sleep at night", icon: "🍃" },
 ];
 
 const GROUPS = [
@@ -96,17 +44,24 @@ interface Props {
   data: Partial<DayData>;
   mealCount: 1 | 2 | 3;
   onChange: (key: keyof DayData, val: boolean) => void;
+  onSave: () => void;
   onClear: () => void;
+  isDirty: boolean;
+  saveStatus: SectionSaveStatus;
 }
 
-export default function HabitChecklist({ data, mealCount, onChange, onClear }: Props) {
-  const visible = (h: HabitDef) =>
-    h.minMeals === undefined || mealCount >= h.minMeals;
-
+export default function HabitChecklist({
+  data,
+  mealCount,
+  onChange,
+  onSave,
+  onClear,
+  isDirty,
+  saveStatus,
+}: Props) {
+  const visible = (h: HabitDef) => h.minMeals === undefined || mealCount >= h.minMeals;
   const total = totalHabitCount(mealCount);
-  const checked = HABITS.filter(visible).filter(
-    (h) => (data[h.key] as boolean) || false
-  ).length;
+  const checked = HABITS.filter(visible).filter((h) => (data[h.key] as boolean) || false).length;
 
   return (
     <motion.div
@@ -119,17 +74,19 @@ export default function HabitChecklist({ data, mealCount, onChange, onClear }: P
       <div className="flex items-center gap-2 mb-4">
         <span className="text-xl">✅</span>
         <h3 className="text-base font-bold text-gray-800">Daily Habits</h3>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1.5">
           <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-pink-50 text-pink-600">
             {checked}/{total}
           </span>
           <motion.button
             whileTap={{ scale: 0.93 }}
             onClick={onClear}
-            className="text-[11px] font-semibold text-gray-400 hover:text-red-400 px-2.5 py-1 rounded-full border border-gray-200 hover:border-red-200 transition-all duration-150"
+            disabled={saveStatus === "saving"}
+            className="text-[11px] font-semibold text-gray-400 hover:text-red-400 px-2.5 py-1 rounded-full border border-gray-200 hover:border-red-200 transition-all duration-150 disabled:opacity-40"
           >
             Clear
           </motion.button>
+          <SaveButton isDirty={isDirty} saveStatus={saveStatus} onSave={onSave} />
         </div>
       </div>
 
@@ -169,32 +126,16 @@ export default function HabitChecklist({ data, mealCount, onChange, onClear }: P
                           }
                         `}
                       >
-                        <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center text-base flex-shrink-0 transition-all ${
-                            isChecked ? "bg-pink-100" : "bg-white"
-                          }`}
-                        >
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-base flex-shrink-0 transition-all ${isChecked ? "bg-pink-100" : "bg-white"}`}>
                           {habit.icon}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p
-                            className={`text-sm font-semibold transition-colors ${
-                              isChecked ? "text-pink-700" : "text-gray-700"
-                            }`}
-                          >
+                          <p className={`text-sm font-semibold transition-colors ${isChecked ? "text-pink-700" : "text-gray-700"}`}>
                             {habit.label}
                           </p>
-                          <p className="text-xs text-gray-400 truncate">
-                            {habit.subtitle}
-                          </p>
+                          <p className="text-xs text-gray-400 truncate">{habit.subtitle}</p>
                         </div>
-                        <div
-                          className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                            isChecked
-                              ? "border-pink-500 bg-pink-500"
-                              : "border-gray-300 bg-white"
-                          }`}
-                        >
+                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${isChecked ? "border-pink-500 bg-pink-500" : "border-gray-300 bg-white"}`}>
                           {isChecked && (
                             <motion.svg
                               initial={{ scale: 0 }}
@@ -204,12 +145,7 @@ export default function HabitChecklist({ data, mealCount, onChange, onClear }: P
                               viewBox="0 0 24 24"
                               stroke="currentColor"
                             >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={3}
-                                d="M5 13l4 4L19 7"
-                              />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                             </motion.svg>
                           )}
                         </div>
@@ -223,5 +159,41 @@ export default function HabitChecklist({ data, mealCount, onChange, onClear }: P
         })}
       </div>
     </motion.div>
+  );
+}
+
+function SaveButton({
+  isDirty,
+  saveStatus,
+  onSave,
+}: {
+  isDirty: boolean;
+  saveStatus: SectionSaveStatus;
+  onSave: () => void;
+}) {
+  const isSaving = saveStatus === "saving";
+  const isSaved = saveStatus === "saved";
+  const isError = saveStatus === "error";
+
+  return (
+    <motion.button
+      whileTap={{ scale: 0.93 }}
+      onClick={onSave}
+      disabled={!isDirty || isSaving}
+      className={`
+        text-[11px] font-bold px-2.5 py-1 rounded-full border transition-all duration-150
+        ${
+          isSaved
+            ? "text-green-600 bg-green-50 border-green-200"
+            : isError
+            ? "text-red-500 bg-red-50 border-red-200"
+            : isDirty
+            ? "text-pink-600 bg-pink-50 border-pink-200 hover:bg-pink-100"
+            : "text-gray-300 bg-gray-50 border-gray-100 cursor-not-allowed"
+        }
+      `}
+    >
+      {isSaving ? "…" : isSaved ? "✓ Saved" : isError ? "⚠ Error" : "Save"}
+    </motion.button>
   );
 }

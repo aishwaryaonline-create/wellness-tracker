@@ -7,6 +7,7 @@ import {
   getFastRating,
   formatTime12,
 } from "@/lib/utils";
+import { SectionSaveStatus } from "@/app/day/DayViewContent";
 
 interface Props {
   firstMealTime: string;
@@ -14,7 +15,10 @@ interface Props {
   prevLastMealTime: string;
   prevLastMealLoaded: boolean;
   onChange: (field: "firstMealTime" | "lastMealTime", val: string) => void;
+  onSave: () => void;
   onClear: () => void;
+  isDirty: boolean;
+  saveStatus: SectionSaveStatus;
 }
 
 const RATING_COLORS: Record<string, string> = {
@@ -31,7 +35,10 @@ export default function FastingTracker({
   prevLastMealTime,
   prevLastMealLoaded,
   onChange,
+  onSave,
   onClear,
+  isDirty,
+  saveStatus,
 }: Props) {
   const overnightHours = calcOvernightFastHours(prevLastMealTime, firstMealTime);
   const eatHours = calcEatWindowHours(firstMealTime, lastMealTime);
@@ -49,14 +56,16 @@ export default function FastingTracker({
       <div className="flex items-center gap-2 mb-4">
         <span className="text-xl">⏱</span>
         <h3 className="text-base font-bold text-gray-800">Intermittent Fasting</h3>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1.5">
           <motion.button
             whileTap={{ scale: 0.93 }}
             onClick={onClear}
-            className="text-[11px] font-semibold text-gray-400 hover:text-red-400 px-2.5 py-1 rounded-full border border-gray-200 hover:border-red-200 transition-all duration-150"
+            disabled={saveStatus === "saving"}
+            className="text-[11px] font-semibold text-gray-400 hover:text-red-400 px-2.5 py-1 rounded-full border border-gray-200 hover:border-red-200 transition-all duration-150 disabled:opacity-40"
           >
             Clear
           </motion.button>
+          <SaveButton isDirty={isDirty} saveStatus={saveStatus} onSave={onSave} />
         </div>
       </div>
 
@@ -92,8 +101,8 @@ export default function FastingTracker({
         </div>
       </div>
 
-      {/* Overnight fast — inline below inputs, shown as soon as firstMealTime entered */}
       <AnimatePresence>
+        {/* Overnight fast — shown as soon as firstMealTime + prevLastMealTime available */}
         {prevLastMealLoaded && firstMealTime && overnightHours > 0 && (
           <motion.div
             key="overnight"
@@ -108,7 +117,7 @@ export default function FastingTracker({
               <div>
                 <p className="text-xs font-semibold text-pink-700 leading-snug">
                   You fasted for{" "}
-                  <span className="text-pink-600 font-extrabold">{overnightHours}h</span>{" "}
+                  <span className="font-extrabold">{overnightHours}h</span>{" "}
                   since yesterday&apos;s last meal
                 </p>
                 <p className="text-xs text-gray-400 mt-0.5">
@@ -147,7 +156,7 @@ export default function FastingTracker({
           </motion.div>
         )}
 
-        {/* No first meal yet, but yesterday data exists — prompt */}
+        {/* No first meal yet, but yesterday data exists */}
         {prevLastMealLoaded && !firstMealTime && prevLastMealTime && (
           <motion.div
             key="enter-first"
@@ -158,13 +167,14 @@ export default function FastingTracker({
           >
             <span className="text-sm leading-none mt-0.5">🌙</span>
             <p className="text-xs text-purple-700 leading-snug">
-              Last night&apos;s meal: <span className="font-bold">{formatTime12(prevLastMealTime)}</span>
+              Last night&apos;s meal:{" "}
+              <span className="font-bold">{formatTime12(prevLastMealTime)}</span>
               {" "}— enter your first meal time to see overnight fast
             </p>
           </motion.div>
         )}
 
-        {/* No first meal, no yesterday data */}
+        {/* Nothing at all */}
         {prevLastMealLoaded && !firstMealTime && !prevLastMealTime && (
           <motion.div
             key="no-prev"
@@ -180,7 +190,7 @@ export default function FastingTracker({
           </motion.div>
         )}
 
-        {/* Eating window — only when both times entered */}
+        {/* Eating window */}
         {hasEatWindow && (
           <motion.div
             key="eatwindow"
@@ -206,5 +216,41 @@ export default function FastingTracker({
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+function SaveButton({
+  isDirty,
+  saveStatus,
+  onSave,
+}: {
+  isDirty: boolean;
+  saveStatus: SectionSaveStatus;
+  onSave: () => void;
+}) {
+  const isSaving = saveStatus === "saving";
+  const isSaved = saveStatus === "saved";
+  const isError = saveStatus === "error";
+
+  return (
+    <motion.button
+      whileTap={{ scale: 0.93 }}
+      onClick={onSave}
+      disabled={!isDirty || isSaving}
+      className={`
+        text-[11px] font-bold px-2.5 py-1 rounded-full border transition-all duration-150
+        ${
+          isSaved
+            ? "text-green-600 bg-green-50 border-green-200"
+            : isError
+            ? "text-red-500 bg-red-50 border-red-200"
+            : isDirty
+            ? "text-pink-600 bg-pink-50 border-pink-200 hover:bg-pink-100"
+            : "text-gray-300 bg-gray-50 border-gray-100 cursor-not-allowed"
+        }
+      `}
+    >
+      {isSaving ? "…" : isSaved ? "✓ Saved" : isError ? "⚠ Error" : "Save"}
+    </motion.button>
   );
 }

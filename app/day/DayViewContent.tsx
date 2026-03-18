@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import Link from "next/link";
 import BlobBackground from "@/components/BlobBackground";
 import FastingTracker from "@/components/FastingTracker";
 import HabitChecklist from "@/components/HabitChecklist";
@@ -17,6 +16,8 @@ import {
   getWeekDates,
   getDayLabel,
 } from "@/lib/utils";
+
+export type SectionSaveStatus = "idle" | "saving" | "saved" | "error";
 
 const EMPTY_DAY = (date: string): DayData => ({
   date,
@@ -41,15 +42,22 @@ const EMPTY_DAY = (date: string): DayData => ({
   wellnessScore: null,
 });
 
-// Confirm dialog helper — uses native confirm for simplicity
-function confirmClear(section: string): boolean {
-  return window.confirm(`Clear all ${section} data for this day? This cannot be undone.`);
+async function patchSection(date: string, fields: Partial<DayData>): Promise<{ id?: string }> {
+  const res = await fetch("/api/notion", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ date, ...fields }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "Save failed");
+  return json.data ?? {};
 }
 
 export default function DayViewContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const dateParam = searchParams.get("date");
-  // Compute today client-side only to avoid SSR/client date mismatch
+
   const [today, setToday] = useState("");
   useEffect(() => {
     setToday(new Date().toISOString().slice(0, 10));
@@ -57,34 +65,47 @@ export default function DayViewContent() {
   const activeDate = dateParam || today || new Date().toISOString().slice(0, 10);
 
   const [dayData, setDayData] = useState<DayData>(EMPTY_DAY(activeDate));
-  const [saving, setSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [loading, setLoading] = useState(true);
   const [prevLastMealTime, setPrevLastMealTime] = useState("");
   const [prevLastMealLoaded, setPrevLastMealLoaded] = useState(false);
 
-  // Always-current ref so save() never closes over stale state
+  // Always-current ref — never stale inside callbacks
   const dayDataRef = useRef<DayData>(dayData);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // ── Per-section dirty state ─────────────────────────────────────────────────
+  const [dirtyFasting, setDirtyFasting] = useState(false);
+  const [dirtyHabits, setDirtyHabits] = useState(false);
+  const [dirtyMeals, setDirtyMeals] = useState(false);
+  const isDirty = dirtyFasting || dirtyHabits || dirtyMeals;
+
+  // ── Per-section save status ─────────────────────────────────────────────────
+  const [fastingSaveStatus, setFastingSaveStatus] = useState<SectionSaveStatus>("idle");
+  const [habitsSaveStatus, setHabitsSaveStatus] = useState<SectionSaveStatus>("idle");
+  const [mealsSaveStatus, setMealsSaveStatus] = useState<SectionSaveStatus>("idle");
 
   const weekDates = getWeekDates(new Date(activeDate + "T00:00:00"));
 
-  // Yesterday's date string
   const yesterday = (() => {
     const d = new Date(activeDate + "T00:00:00");
     d.setDate(d.getDate() - 1);
     return d.toISOString().slice(0, 10);
   })();
 
-  // Load today's data and yesterday's last meal time in parallel
+  // ── Load data on date change ────────────────────────────────────────────────
   useEffect(() => {
     setLoading(true);
     setPrevLastMealLoaded(false);
     setPrevLastMealTime("");
+    setDirtyFasting(false);
+    setDirtyHabits(false);
+    setDirtyMeals(false);
+    setFastingSaveStatus("idle");
+    setHabitsSaveStatus("idle");
+    setMealsSaveStatus("idle");
+
     const empty = EMPTY_DAY(activeDate);
     setDayData(empty);
     dayDataRef.current = empty;
-    clearTimeout(debounceRef.current);
 
     const todayFetch = fetch(`/api/notion?date=${activeDate}`)
       .then((r) => r.json())
@@ -107,71 +128,182 @@ export default function DayViewContent() {
     Promise.all([todayFetch, yesterdayFetch]).finally(() => setLoading(false));
   }, [activeDate, yesterday]);
 
-  const save = useCallback(async (data: DayData) => {
-    setSaving(true);
-    setSaveStatus("saving");
-    try {
-      const breakdown = calcWellnessScore(data);
-      const withScore = { ...data, wellnessScore: breakdown.total };
-      const res = await fetch("/api/notion", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(withScore),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      if (json.data?.id) {
-        setDayData((prev) => ({ ...prev, id: json.data.id, wellnessScore: breakdown.total }));
-        dayDataRef.current = { ...dayDataRef.current, id: json.data.id, wellnessScore: breakdown.total };
+  // ── Beforeunload warning ────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = "";
       }
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 2000);
-    } catch (err) {
-      console.error("Save error:", err);
-      setSaveStatus("error");
-      setTimeout(() => setSaveStatus("idle"), 3000);
-    } finally {
-      setSaving(false);
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+  // ── Navigation with unsaved-changes check ───────────────────────────────────
+  function navigateToDate(date: string) {
+    if (isDirty) {
+      const ok = window.confirm(
+        "You have unsaved changes. Leave without saving?"
+      );
+      if (!ok) return;
     }
+    setDirtyFasting(false);
+    setDirtyHabits(false);
+    setDirtyMeals(false);
+    router.replace(`/day?date=${date}`);
+  }
+
+  // ── Local field updaters (no auto-save) ────────────────────────────────────
+  const updateFastingField = useCallback(
+    (field: "firstMealTime" | "lastMealTime", val: string) => {
+      const next = { ...dayDataRef.current, [field]: val };
+      dayDataRef.current = next;
+      setDayData(next);
+      setDirtyFasting(true);
+    },
+    []
+  );
+
+  const updateHabitField = useCallback((key: keyof DayData, val: boolean) => {
+    const next = { ...dayDataRef.current, [key]: val };
+    dayDataRef.current = next;
+    setDayData(next);
+    setDirtyHabits(true);
   }, []);
 
-  // Immediate save — for habits, meal count, analysis
-  const updateFieldNow = useCallback(<K extends keyof DayData>(key: K, value: DayData[K]) => {
-    const next = { ...dayDataRef.current, [key]: value };
+  const updateMealField = useCallback((key: string, val: string) => {
+    const next = { ...dayDataRef.current, [key]: val };
     dayDataRef.current = next;
     setDayData(next);
-    clearTimeout(debounceRef.current);
-    save(next);
-  }, [save]);
+    setDirtyMeals(true);
+  }, []);
 
-  // Debounced save — for text inputs (meal text, meal times)
-  const updateField = useCallback(<K extends keyof DayData>(key: K, value: DayData[K]) => {
-    const next = { ...dayDataRef.current, [key]: value };
+  const updateMealCount = useCallback((val: 1 | 2 | 3) => {
+    const next = { ...dayDataRef.current, mealCount: val };
     dayDataRef.current = next;
     setDayData(next);
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => save(next), 1000);
-  }, [save]);
+    setDirtyMeals(true);
+  }, []);
 
-  // ── Clear handlers ──────────────────────────────────────────────────────────
-
-  const clearFasting = useCallback(() => {
-    if (!confirmClear("fasting")) return;
-    const next = {
-      ...dayDataRef.current,
-      firstMealTime: "",
-      lastMealTime: "",
-    };
+  const updateAnalysis = useCallback((result: AyurvedaAnalysis) => {
+    const next = { ...dayDataRef.current, analysisJson: result };
     dayDataRef.current = next;
     setDayData(next);
-    clearTimeout(debounceRef.current);
-    save(next);
-  }, [save]);
+    setDirtyMeals(true);
+  }, []);
 
-  const clearHabits = useCallback(() => {
-    if (!confirmClear("habits")) return;
-    const next = {
-      ...dayDataRef.current,
+  // ── Per-section save functions ──────────────────────────────────────────────
+  const overnightFastHours = calcOvernightFastHours(prevLastMealTime, dayData.firstMealTime);
+
+  const saveFasting = useCallback(async () => {
+    setFastingSaveStatus("saving");
+    try {
+      const data = dayDataRef.current;
+      const overnight = calcOvernightFastHours(prevLastMealTime, data.firstMealTime);
+      const score = calcWellnessScore(data, overnight);
+      const saved = await patchSection(activeDate, {
+        firstMealTime: data.firstMealTime,
+        lastMealTime: data.lastMealTime,
+        wellnessScore: score.total,
+      });
+      if (saved.id) {
+        dayDataRef.current = { ...dayDataRef.current, id: saved.id, wellnessScore: score.total };
+        setDayData((prev) => ({ ...prev, id: saved.id, wellnessScore: score.total }));
+      }
+      setDirtyFasting(false);
+      setFastingSaveStatus("saved");
+      setTimeout(() => setFastingSaveStatus("idle"), 2000);
+    } catch (err) {
+      console.error("Fasting save error:", err);
+      setFastingSaveStatus("error");
+      setTimeout(() => setFastingSaveStatus("idle"), 3000);
+    }
+  }, [activeDate, prevLastMealTime]);
+
+  const saveHabits = useCallback(async () => {
+    setHabitsSaveStatus("saving");
+    try {
+      const data = dayDataRef.current;
+      const overnight = calcOvernightFastHours(prevLastMealTime, data.firstMealTime);
+      const score = calcWellnessScore(data, overnight);
+      const saved = await patchSection(activeDate, {
+        morningRitual: data.morningRitual,
+        kashayamMorning: data.kashayamMorning,
+        kashayamEvening: data.kashayamEvening,
+        weightLossTabletMorning: data.weightLossTabletMorning,
+        weightLossTabletEvening: data.weightLossTabletEvening,
+        spirulinaMorning: data.spirulinaMorning,
+        spirulinaEvening: data.spirulinaEvening,
+        psylliumHuskMorning: data.psylliumHuskMorning,
+        psylliumHuskEvening: data.psylliumHuskEvening,
+        triphalaChurnam: data.triphalaChurnam,
+        wellnessScore: score.total,
+      });
+      if (saved.id) {
+        dayDataRef.current = { ...dayDataRef.current, id: saved.id, wellnessScore: score.total };
+        setDayData((prev) => ({ ...prev, id: saved.id, wellnessScore: score.total }));
+      }
+      setDirtyHabits(false);
+      setHabitsSaveStatus("saved");
+      setTimeout(() => setHabitsSaveStatus("idle"), 2000);
+    } catch (err) {
+      console.error("Habits save error:", err);
+      setHabitsSaveStatus("error");
+      setTimeout(() => setHabitsSaveStatus("idle"), 3000);
+    }
+  }, [activeDate, prevLastMealTime]);
+
+  const saveMeals = useCallback(async () => {
+    setMealsSaveStatus("saving");
+    try {
+      const data = dayDataRef.current;
+      const overnight = calcOvernightFastHours(prevLastMealTime, data.firstMealTime);
+      const score = calcWellnessScore(data, overnight);
+      const saved = await patchSection(activeDate, {
+        mealCount: data.mealCount,
+        meal1: data.meal1,
+        meal2: data.meal2,
+        meal3: data.meal3,
+        snacks: data.snacks,
+        analysisJson: data.analysisJson,
+        wellnessScore: score.total,
+      });
+      if (saved.id) {
+        dayDataRef.current = { ...dayDataRef.current, id: saved.id, wellnessScore: score.total };
+        setDayData((prev) => ({ ...prev, id: saved.id, wellnessScore: score.total }));
+      }
+      setDirtyMeals(false);
+      setMealsSaveStatus("saved");
+      setTimeout(() => setMealsSaveStatus("idle"), 2000);
+    } catch (err) {
+      console.error("Meals save error:", err);
+      setMealsSaveStatus("error");
+      setTimeout(() => setMealsSaveStatus("idle"), 3000);
+    }
+  }, [activeDate, prevLastMealTime]);
+
+  // ── Clear handlers (immediate Notion wipe with confirmation) ────────────────
+  const clearFasting = useCallback(async () => {
+    if (!window.confirm("Clear fasting times for this day? This cannot be undone.")) return;
+    const next = { ...dayDataRef.current, firstMealTime: "", lastMealTime: "" };
+    dayDataRef.current = next;
+    setDayData(next);
+    setDirtyFasting(false);
+    setFastingSaveStatus("saving");
+    try {
+      await patchSection(activeDate, { firstMealTime: "", lastMealTime: "" });
+      setFastingSaveStatus("saved");
+      setTimeout(() => setFastingSaveStatus("idle"), 1500);
+    } catch {
+      setFastingSaveStatus("error");
+      setTimeout(() => setFastingSaveStatus("idle"), 3000);
+    }
+  }, [activeDate]);
+
+  const clearHabits = useCallback(async () => {
+    if (!window.confirm("Clear all habits for this day? This cannot be undone.")) return;
+    const cleared = {
       morningRitual: false,
       kashayamMorning: false,
       kashayamEvening: false,
@@ -183,31 +315,40 @@ export default function DayViewContent() {
       psylliumHuskEvening: false,
       triphalaChurnam: false,
     };
+    const next = { ...dayDataRef.current, ...cleared };
     dayDataRef.current = next;
     setDayData(next);
-    clearTimeout(debounceRef.current);
-    save(next);
-  }, [save]);
+    setDirtyHabits(false);
+    setHabitsSaveStatus("saving");
+    try {
+      await patchSection(activeDate, cleared);
+      setHabitsSaveStatus("saved");
+      setTimeout(() => setHabitsSaveStatus("idle"), 1500);
+    } catch {
+      setHabitsSaveStatus("error");
+      setTimeout(() => setHabitsSaveStatus("idle"), 3000);
+    }
+  }, [activeDate]);
 
-  const clearMeals = useCallback(() => {
-    if (!confirmClear("meals")) return;
-    const next = {
-      ...dayDataRef.current,
-      meal1: "",
-      meal2: "",
-      meal3: "",
-      snacks: "",
-      analysisJson: null,
-    };
+  const clearMeals = useCallback(async () => {
+    if (!window.confirm("Clear all meals and analysis for this day? This cannot be undone.")) return;
+    const cleared = { meal1: "", meal2: "", meal3: "", snacks: "", analysisJson: null };
+    const next = { ...dayDataRef.current, ...cleared };
     dayDataRef.current = next;
     setDayData(next);
-    clearTimeout(debounceRef.current);
-    save(next);
-  }, [save]);
+    setDirtyMeals(false);
+    setMealsSaveStatus("saving");
+    try {
+      await patchSection(activeDate, cleared);
+      setMealsSaveStatus("saved");
+      setTimeout(() => setMealsSaveStatus("idle"), 1500);
+    } catch {
+      setMealsSaveStatus("error");
+      setTimeout(() => setMealsSaveStatus("idle"), 3000);
+    }
+  }, [activeDate]);
 
-  // ───────────────────────────────────────────────────────────────────────────
-
-  const overnightFastHours = calcOvernightFastHours(prevLastMealTime, dayData.firstMealTime);
+  // ── Render ──────────────────────────────────────────────────────────────────
   const scoreBreakdown = calcWellnessScore(dayData, overnightFastHours);
 
   return (
@@ -217,16 +358,26 @@ export default function DayViewContent() {
       <div className="relative z-10 max-w-md mx-auto px-4 pb-20">
         {/* Header */}
         <div className="pt-12 pb-3 flex items-center gap-3">
-          <Link href="/">
-            <motion.button
+          <button
+            onClick={() => {
+              if (isDirty) {
+                if (!window.confirm("You have unsaved changes. Leave without saving?")) return;
+              }
+              router.push("/");
+            }}
+          >
+            <motion.span
               whileTap={{ scale: 0.9 }}
               className="w-9 h-9 rounded-full bg-white border border-pink-100 shadow-card flex items-center justify-center text-gray-600 hover:border-pink-300 transition-colors"
             >
               ←
-            </motion.button>
-          </Link>
+            </motion.span>
+          </button>
           <div className="flex-1">
-            <h1 className="text-lg font-extrabold text-gray-900 leading-tight" suppressHydrationWarning>
+            <h1
+              className="text-lg font-extrabold text-gray-900 leading-tight"
+              suppressHydrationWarning
+            >
               {formatDateFull(activeDate)}
             </h1>
             {today && activeDate === today && (
@@ -234,31 +385,16 @@ export default function DayViewContent() {
             )}
           </div>
 
-          {/* Saving indicator */}
-          <motion.div
-            initial={false}
-            animate={{ opacity: saveStatus === "idle" ? 0 : 1 }}
-            transition={{ duration: 0.2 }}
-            className={`text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
-              saveStatus === "saving"
-                ? "bg-yellow-50 text-yellow-600"
-                : saveStatus === "saved"
-                ? "bg-green-50 text-green-600"
-                : saveStatus === "error"
-                ? "bg-red-50 text-red-500"
-                : "bg-gray-50 text-gray-400"
-            }`}
-          >
-            {saveStatus === "saving" && (
-              <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-            )}
-            {saveStatus === "saving" && "Saving…"}
-            {saveStatus === "saved" && "✓ Saved"}
-            {saveStatus === "error" && "⚠ Error"}
-          </motion.div>
+          {/* Unsaved changes indicator */}
+          {isDirty && (
+            <motion.span
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-200"
+            >
+              Unsaved
+            </motion.span>
+          )}
         </div>
 
         {/* Day selector strip */}
@@ -269,29 +405,25 @@ export default function DayViewContent() {
             const dayNum = new Date(date + "T00:00:00").getDate();
             const dayLabel = getDayLabel(date);
             return (
-              <Link key={date} href={`/day?date=${date}`} replace>
-                <motion.div
-                  whileTap={{ scale: 0.93 }}
-                  className={`
-                    flex-shrink-0 w-11 flex flex-col items-center py-2.5 px-1.5 rounded-2xl cursor-pointer
-                    transition-all duration-200 border-2
-                    ${
-                      isActive
-                        ? "border-pink-500 bg-gradient-to-b from-pink-500 to-pink-400 text-white shadow-pink"
-                        : isToday
-                        ? "border-pink-200 bg-pink-50 text-pink-600"
-                        : "border-transparent bg-white text-gray-500 shadow-card"
-                    }
-                  `}
-                >
-                  <span className="text-[10px] font-semibold opacity-80">
-                    {dayLabel}
-                  </span>
-                  <span className="text-sm font-bold leading-none mt-0.5">
-                    {dayNum}
-                  </span>
-                </motion.div>
-              </Link>
+              <motion.button
+                key={date}
+                whileTap={{ scale: 0.93 }}
+                onClick={() => navigateToDate(date)}
+                className={`
+                  flex-shrink-0 w-11 flex flex-col items-center py-2.5 px-1.5 rounded-2xl cursor-pointer
+                  transition-all duration-200 border-2
+                  ${
+                    isActive
+                      ? "border-pink-500 bg-gradient-to-b from-pink-500 to-pink-400 text-white shadow-pink"
+                      : isToday
+                      ? "border-pink-200 bg-pink-50 text-pink-600"
+                      : "border-transparent bg-white text-gray-500 shadow-card"
+                  }
+                `}
+              >
+                <span className="text-[10px] font-semibold opacity-80">{dayLabel}</span>
+                <span className="text-sm font-bold leading-none mt-0.5">{dayNum}</span>
+              </motion.button>
             );
           })}
         </div>
@@ -304,11 +436,7 @@ export default function DayViewContent() {
           </div>
         ) : (
           <>
-            <WellnessScoreCard
-              score={scoreBreakdown}
-              saving={saving}
-              saveStatus={saveStatus}
-            />
+            <WellnessScoreCard score={scoreBreakdown} />
 
             <div className="space-y-4">
               <FastingTracker
@@ -316,15 +444,21 @@ export default function DayViewContent() {
                 lastMealTime={dayData.lastMealTime}
                 prevLastMealTime={prevLastMealTime}
                 prevLastMealLoaded={prevLastMealLoaded}
-                onChange={(field, val) => updateField(field, val)}
+                onChange={updateFastingField}
+                onSave={saveFasting}
                 onClear={clearFasting}
+                isDirty={dirtyFasting}
+                saveStatus={fastingSaveStatus}
               />
 
               <HabitChecklist
                 data={dayData}
                 mealCount={dayData.mealCount}
-                onChange={(key, val) => updateFieldNow(key, val)}
+                onChange={updateHabitField}
+                onSave={saveHabits}
                 onClear={clearHabits}
+                isDirty={dirtyHabits}
+                saveStatus={habitsSaveStatus}
               />
 
               <MealLogger
@@ -334,12 +468,13 @@ export default function DayViewContent() {
                 meal3={dayData.meal3}
                 snacks={dayData.snacks}
                 analysis={dayData.analysisJson}
-                onMealChange={(field, val) => updateField(field, val)}
-                onMealCountChange={(val) => updateFieldNow("mealCount", val)}
-                onAnalysis={(result: AyurvedaAnalysis) =>
-                  updateFieldNow("analysisJson", result)
-                }
+                onMealChange={updateMealField}
+                onMealCountChange={updateMealCount}
+                onAnalysis={updateAnalysis}
+                onSave={saveMeals}
                 onClear={clearMeals}
+                isDirty={dirtyMeals}
+                saveStatus={mealsSaveStatus}
               />
             </div>
           </>

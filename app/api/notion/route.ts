@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDayData, upsertDayData, getWeekData } from "@/lib/notion";
+import { getDayData, upsertDayData, patchDayData, getWeekData } from "@/lib/notion";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -30,6 +30,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ data: saved });
   } catch (err: any) {
     console.error("Notion POST error:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+/** Partial update — only touches the fields included in the request body. */
+export async function PATCH(req: NextRequest) {
+  try {
+    const { date, ...fields } = await req.json();
+    if (!date) return NextResponse.json({ error: "Missing date" }, { status: 400 });
+    const saved = await patchDayData(date, fields);
+    return NextResponse.json({ data: saved });
+  } catch (err: any) {
+    console.error("Notion PATCH error:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

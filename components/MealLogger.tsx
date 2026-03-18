@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AyurvedaAnalysis } from "@/lib/types";
 import AnalysisCard from "./AnalysisCard";
+import { SectionSaveStatus } from "@/app/day/DayViewContent";
 
 type MealField = "meal1" | "meal2" | "meal3" | "snacks";
 
@@ -16,29 +17,10 @@ interface MealFieldDef {
 }
 
 const ALL_MEAL_FIELDS: MealFieldDef[] = [
-  {
-    key: "meal1",
-    label: "Meal 1",
-    placeholder: "e.g. Moong dal khichdi with ghee and cumin…",
-  },
-  {
-    key: "meal2",
-    label: "Meal 2",
-    placeholder: "e.g. Rajma chawal, cucumber salad…",
-    minMeals: 2,
-  },
-  {
-    key: "meal3",
-    label: "Meal 3",
-    placeholder: "e.g. Vegetable soup with roti…",
-    minMeals: 3,
-  },
-  {
-    key: "snacks",
-    label: "Snacks",
-    placeholder: "e.g. Handful of almonds, green tea…",
-    alwaysShow: true,
-  },
+  { key: "meal1", label: "Meal 1", placeholder: "e.g. Moong dal khichdi with ghee and cumin…" },
+  { key: "meal2", label: "Meal 2", placeholder: "e.g. Rajma chawal, cucumber salad…", minMeals: 2 },
+  { key: "meal3", label: "Meal 3", placeholder: "e.g. Vegetable soup with roti…", minMeals: 3 },
+  { key: "snacks", label: "Snacks", placeholder: "e.g. Handful of almonds, green tea…", alwaysShow: true },
 ];
 
 interface Props {
@@ -51,26 +33,28 @@ interface Props {
   onMealChange: (field: MealField, val: string) => void;
   onMealCountChange: (val: 1 | 2 | 3) => void;
   onAnalysis: (result: AyurvedaAnalysis) => void;
+  onSave: () => void;
   onClear: () => void;
+  isDirty: boolean;
+  saveStatus: SectionSaveStatus;
 }
 
 export default function MealLogger({
   mealCount,
-  meal1,
-  meal2,
-  meal3,
-  snacks,
+  meal1, meal2, meal3, snacks,
   analysis,
   onMealChange,
   onMealCountChange,
   onAnalysis,
+  onSave,
   onClear,
+  isDirty,
+  saveStatus,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const count: 1 | 2 | 3 = (mealCount === 1 || mealCount === 2 || mealCount === 3) ? mealCount : 2;
-
   const values: Record<MealField, string> = { meal1, meal2, meal3, snacks };
 
   const visibleFields = ALL_MEAL_FIELDS.filter((f) => {
@@ -79,13 +63,11 @@ export default function MealLogger({
     return count >= f.minMeals;
   });
 
-  function isNil(val: string) {
-    return val === "Nil";
-  }
-
-  function toggleNil(field: MealField) {
+  const isNil = (val: string) => val === "Nil";
+  const toggleNil = (field: MealField) =>
     onMealChange(field, isNil(values[field]) ? "" : "Nil");
-  }
+
+  const hasAnyMeal = visibleFields.some(({ key }) => values[key] && values[key] !== "Nil");
 
   function buildMealLogForAI(): string {
     return visibleFields
@@ -98,10 +80,6 @@ export default function MealLogger({
       .filter(Boolean)
       .join("\n");
   }
-
-  const hasAnyMeal = visibleFields.some(
-    ({ key }) => values[key] && values[key] !== "Nil"
-  );
 
   async function handleAnalyze() {
     if (!hasAnyMeal) return;
@@ -155,10 +133,12 @@ export default function MealLogger({
           <motion.button
             whileTap={{ scale: 0.93 }}
             onClick={onClear}
-            className="ml-1 text-[11px] font-semibold text-gray-400 hover:text-red-400 px-2.5 py-1 rounded-full border border-gray-200 hover:border-red-200 transition-all duration-150"
+            disabled={saveStatus === "saving"}
+            className="ml-1 text-[11px] font-semibold text-gray-400 hover:text-red-400 px-2.5 py-1 rounded-full border border-gray-200 hover:border-red-200 transition-all duration-150 disabled:opacity-40"
           >
             Clear
           </motion.button>
+          <SaveButton isDirty={isDirty} saveStatus={saveStatus} onSave={onSave} />
         </div>
       </div>
 
@@ -186,10 +166,9 @@ export default function MealLogger({
                     onClick={() => toggleNil(key)}
                     className={`
                       text-[11px] font-bold px-2.5 py-1 rounded-full border transition-all duration-150
-                      ${
-                        nil
-                          ? "bg-gray-200 text-gray-500 border-gray-300"
-                          : "bg-white text-gray-400 border-gray-200 hover:border-gray-300"
+                      ${nil
+                        ? "bg-gray-200 text-gray-500 border-gray-300"
+                        : "bg-white text-gray-400 border-gray-200 hover:border-gray-300"
                       }
                     `}
                   >
@@ -205,10 +184,9 @@ export default function MealLogger({
                   className={`
                     w-full px-3.5 py-2.5 rounded-xl border-2 text-sm transition-all duration-150
                     focus:outline-none resize-none
-                    ${
-                      nil
-                        ? "border-gray-100 bg-gray-50 text-gray-300 placeholder-gray-300 cursor-not-allowed"
-                        : "border-pink-100 bg-white text-gray-700 placeholder-gray-300 focus:border-pink-400 focus:ring-2 focus:ring-pink-100"
+                    ${nil
+                      ? "border-gray-100 bg-gray-50 text-gray-300 placeholder-gray-300 cursor-not-allowed"
+                      : "border-pink-100 bg-white text-gray-700 placeholder-gray-300 focus:border-pink-400 focus:ring-2 focus:ring-pink-100"
                     }
                   `}
                 />
@@ -219,9 +197,7 @@ export default function MealLogger({
       </div>
 
       {error && (
-        <p className="text-xs text-red-500 mb-3 flex items-center gap-1">
-          ⚠️ {error}
-        </p>
+        <p className="text-xs text-red-500 mb-3 flex items-center gap-1">⚠️ {error}</p>
       )}
 
       <motion.button
@@ -244,10 +220,19 @@ export default function MealLogger({
             </svg>
             Analyzing with Ayurveda AI...
           </span>
+        ) : analysis ? (
+          "🔄 Re-analyze"
         ) : (
           "✨ Analyze with Ayurveda AI"
         )}
       </motion.button>
+
+      {/* Unsaved analysis hint */}
+      {isDirty && analysis && (
+        <p className="text-xs text-amber-600 text-center mt-2">
+          Analysis updated — click Save to persist
+        </p>
+      )}
 
       <AnimatePresence>
         {analysis && (
@@ -264,5 +249,41 @@ export default function MealLogger({
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+function SaveButton({
+  isDirty,
+  saveStatus,
+  onSave,
+}: {
+  isDirty: boolean;
+  saveStatus: SectionSaveStatus;
+  onSave: () => void;
+}) {
+  const isSaving = saveStatus === "saving";
+  const isSaved = saveStatus === "saved";
+  const isError = saveStatus === "error";
+
+  return (
+    <motion.button
+      whileTap={{ scale: 0.93 }}
+      onClick={onSave}
+      disabled={!isDirty || isSaving}
+      className={`
+        text-[11px] font-bold px-2.5 py-1 rounded-full border transition-all duration-150
+        ${
+          isSaved
+            ? "text-green-600 bg-green-50 border-green-200"
+            : isError
+            ? "text-red-500 bg-red-50 border-red-200"
+            : isDirty
+            ? "text-pink-600 bg-pink-50 border-pink-200 hover:bg-pink-100"
+            : "text-gray-300 bg-gray-50 border-gray-100 cursor-not-allowed"
+        }
+      `}
+    >
+      {isSaving ? "…" : isSaved ? "✓ Saved" : isError ? "⚠ Error" : "Save"}
+    </motion.button>
   );
 }
