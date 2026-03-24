@@ -35,7 +35,16 @@ const EXPECTED_PROPERTIES = [
   "Meal 3",
   "Snacks",
   "Analysis JSON",
+  "Weight Loss Analysis JSON",
   "Wellness Score",
+  "Weight",
+  "Cycle Phase",
+  "Period Start",
+  "Sleep Hours",
+  "Steps",
+  "Active Calories",
+  "Resting Heart Rate",
+  "Workouts",
 ];
 
 export async function GET() {

@@ -6,14 +6,20 @@ import Link from "next/link";
 import BlobBackground from "@/components/BlobBackground";
 import DayCard from "@/components/DayCard";
 import HabitHeatmap from "@/components/HabitHeatmap";
+import WeightTrendChart from "@/components/WeightTrendChart";
 import { DayData } from "@/lib/types";
-import { getWeekDates } from "@/lib/utils";
+import { getWeekDates, calcFastHours, calcHabitRate } from "@/lib/utils";
+
+const CYCLE_PHASE_ICON: Record<string, string> = {
+  Menstrual: "🔴",
+  Follicular: "🌱",
+  Ovulatory: "✨",
+  Luteal: "🌙",
+};
 
 export default function WeekView() {
   const [weekDates] = useState<string[]>(getWeekDates());
-  const [weekData, setWeekData] = useState<(DayData | null)[]>(
-    Array(7).fill(null)
-  );
+  const [weekData, setWeekData] = useState<(DayData | null)[]>(Array(7).fill(null));
   const [loading, setLoading] = useState(true);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -22,15 +28,11 @@ export default function WeekView() {
       try {
         const start = weekDates[0];
         const end = weekDates[6];
-        const res = await fetch(
-          `/api/notion?start=${start}&end=${end}`
-        );
+        const res = await fetch(`/api/notion?start=${start}&end=${end}`);
         const json = await res.json();
         if (json.data) {
           const dataMap: Record<string, DayData> = {};
-          json.data.forEach((d: DayData) => {
-            dataMap[d.date] = d;
-          });
+          json.data.forEach((d: DayData) => { dataMap[d.date] = d; });
           setWeekData(weekDates.map((d) => dataMap[d] || null));
         }
       } catch (e) {
@@ -45,15 +47,34 @@ export default function WeekView() {
   const weekStr = (() => {
     const start = new Date(weekDates[0] + "T00:00:00");
     const end = new Date(weekDates[6] + "T00:00:00");
-    return `${start.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    })} – ${end.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })}`;
+    return `${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
   })();
+
+  // ── Weekly stats ────────────────────────────────────────────────────────────
+  const daysWithFasting = weekData.filter(
+    (d): d is DayData => d != null && !!d.firstMealTime && !!d.lastMealTime
+  );
+  const avgFastingHours =
+    daysWithFasting.length > 0
+      ? Math.round(
+          (daysWithFasting.reduce((s, d) => s + calcFastHours(d.firstMealTime, d.lastMealTime), 0) /
+            daysWithFasting.length) *
+            10
+        ) / 10
+      : null;
+
+  const daysWithData = weekData.filter((d): d is DayData => d != null);
+  const weekHabitPct =
+    daysWithData.length > 0
+      ? Math.round(
+          (daysWithData.reduce((s, d) => s + calcHabitRate(d), 0) / daysWithData.length) * 100
+        )
+      : null;
+
+  const currentCyclePhase =
+    [...weekData].reverse().find((d) => d?.cyclePhase)?.cyclePhase ?? null;
+
+  const hasWeightData = weekData.some((d) => d?.weight != null);
 
   return (
     <div className="relative min-h-screen">
@@ -71,51 +92,81 @@ export default function WeekView() {
               <h1 className="text-2xl font-extrabold text-gray-900 leading-tight">
                 Aish's Wellness
               </h1>
-              <p className="text-sm text-gray-400 font-medium mt-0.5">
-                Ayurvedic Habit Tracker
-              </p>
+              <p className="text-sm text-gray-400 font-medium mt-0.5">Ayurvedic Habit Tracker</p>
             </div>
             <div className="w-12 h-12 rounded-full bg-gradient-to-br from-pink-500 to-pink-300 flex items-center justify-center shadow-pink">
               <span className="text-xl">🌙</span>
             </div>
           </div>
-
-          <p className="text-xs font-semibold text-gray-400 mt-4 tracking-wide uppercase">
-            {weekStr}
-          </p>
+          <p className="text-xs font-semibold text-gray-400 mt-4 tracking-wide uppercase">{weekStr}</p>
         </motion.div>
 
         {/* Week cards */}
         {loading ? (
-          <div className="grid grid-cols-4 gap-2 mb-6">
-            {Array(7)
-              .fill(0)
-              .map((_, i) => (
-                <div
-                  key={i}
-                  className="bg-white rounded-2xl h-36 animate-pulse border border-pink-50"
-                />
-              ))}
+          <div className="grid grid-cols-4 gap-2 mb-4">
+            {Array(7).fill(0).map((_, i) => (
+              <div key={i} className="bg-white rounded-2xl h-36 animate-pulse border border-pink-50" />
+            ))}
           </div>
         ) : (
-          <div className="grid grid-cols-4 gap-2 mb-6">
+          <div className="grid grid-cols-4 gap-2 mb-4">
             {weekDates.slice(0, 4).map((date, i) => (
-              <DayCard
-                key={date}
-                date={date}
-                data={weekData[i]}
-                isToday={date === today}
-              />
+              <DayCard key={date} date={date} data={weekData[i]} isToday={date === today} />
             ))}
             {weekDates.slice(4).map((date, i) => (
-              <DayCard
-                key={date}
-                date={date}
-                data={weekData[i + 4]}
-                isToday={date === today}
-              />
+              <DayCard key={date} date={date} data={weekData[i + 4]} isToday={date === today} />
             ))}
           </div>
+        )}
+
+        {/* Weekly stats row */}
+        {!loading && daysWithData.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="grid grid-cols-3 gap-2 mb-4"
+          >
+            <div className="bg-white rounded-2xl border border-pink-100 shadow-card p-3 text-center">
+              <p className="text-lg font-extrabold text-gray-800">
+                {avgFastingHours != null ? `${avgFastingHours}h` : "—"}
+              </p>
+              <p className="text-[10px] text-gray-400 font-semibold mt-0.5">⏱ Avg Fast</p>
+            </div>
+            <div className="bg-white rounded-2xl border border-pink-100 shadow-card p-3 text-center">
+              <p className="text-lg font-extrabold text-gray-800">
+                {weekHabitPct != null ? `${weekHabitPct}%` : "—"}
+              </p>
+              <p className="text-[10px] text-gray-400 font-semibold mt-0.5">✓ Habits</p>
+            </div>
+            <div className="bg-white rounded-2xl border border-pink-100 shadow-card p-3 text-center">
+              {currentCyclePhase ? (
+                <>
+                  <p className="text-lg">{CYCLE_PHASE_ICON[currentCyclePhase] || "🌸"}</p>
+                  <p className="text-[10px] text-gray-400 font-semibold mt-0.5 truncate">
+                    {currentCyclePhase}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-lg">🌸</p>
+                  <p className="text-[10px] text-gray-400 font-semibold mt-0.5">Cycle</p>
+                </>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Weight trend chart */}
+        {!loading && hasWeightData && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="mb-4"
+          >
+            <WeightTrendChart weekDates={weekDates} weekData={weekData} />
+          </motion.div>
         )}
 
         {/* Quick today button */}
@@ -129,14 +180,8 @@ export default function WeekView() {
             <motion.div
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
-              className="
-                w-full py-4 rounded-2xl font-bold text-white text-center
-                bg-gradient-to-r from-pink-500 via-pink-400 to-coral-400
-                shadow-pink hover:shadow-pink-lg transition-all cursor-pointer
-              "
-              style={{
-                background: "linear-gradient(135deg, #E91E8C, #FF6B6B)",
-              }}
+              className="w-full py-4 rounded-2xl font-bold text-white text-center shadow-pink hover:shadow-pink-lg transition-all cursor-pointer"
+              style={{ background: "linear-gradient(135deg, #E91E8C, #FF6B6B)" }}
             >
               Log Today →
             </motion.div>
@@ -154,7 +199,6 @@ export default function WeekView() {
           </motion.div>
         )}
 
-        {/* Footer */}
         <p className="text-center text-xs text-gray-300 mt-8 font-medium">
           🌿 Kapha balance · Ama reduction · Agni support
         </p>

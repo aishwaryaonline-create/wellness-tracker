@@ -4,14 +4,14 @@ export interface DayData {
   // Habits — Morning Ritual
   morningRitual: boolean;
   // Kashayam (scales with meal count)
-  kashayamMorning: boolean;   // Meal 1
-  kashayamEvening: boolean;   // Meal 2
+  kashayamMorning: boolean;
+  kashayamEvening: boolean;
   // Wellness Tablet (scales with meal count)
-  wellnessTabletMorning: boolean;  // Meal 1
-  wellnessTabletEvening: boolean;  // Meal 2
+  wellnessTabletMorning: boolean;
+  wellnessTabletEvening: boolean;
   // Green Supplement (scales with meal count)
-  greenSupplementMorning: boolean;  // Meal 1
-  greenSupplementEvening: boolean;  // Meal 2
+  greenSupplementMorning: boolean;
+  greenSupplementEvening: boolean;
   // Fixed habits
   psylliumHuskMorning: boolean;
   psylliumHuskEvening: boolean;
@@ -20,24 +20,50 @@ export interface DayData {
   mealCount: 1 | 2 | 3;
   firstMealTime: string; // HH:MM
   lastMealTime: string;  // HH:MM
-  meal1: string; // meal description or "Nil"
+  meal1: string;
   meal2: string;
   meal3: string;
   snacks: string;
+  // Health metrics
+  weight?: number | null;
+  cyclePhase?: string | null;
+  periodStart?: boolean;
+  sleepHours?: number | null;
+  steps?: number | null;
+  activeCalories?: number | null;
+  restingHeartRate?: number | null;
+  workouts?: string | null;
   // Analysis & scoring
   analysisJson?: AyurvedaAnalysis | null;
+  weightLossAnalysisJson?: WeightLossAnalysis | null;
   wellnessScore?: number | null;
 }
 
 export interface AyurvedaAnalysis {
   summary: string;
   score: number;
+  scoreLabel?: string;
   doshaBalance: string;
   agniSupport: string;
   amaRisk: "low" | "medium" | "high";
+  amaNote?: string;
   wins: string[];
   flags: string[];
+  hormonalNote?: string;
   tipForTomorrow: string;
+}
+
+export interface WeightLossAnalysis {
+  overallVerdict: string;
+  sustainabilityScore: number;
+  caloricAdequacy: "too low" | "adequate" | "too high";
+  proteinAdequacy: "insufficient" | "adequate" | "good";
+  fastingEffectiveness: string;
+  supplementSupport: string;
+  cycleImpact: string;
+  wins: string[];
+  redFlags: string[];
+  recommendationForTomorrow: string;
 }
 
 export interface WellnessScoreBreakdown {
@@ -48,4 +74,14 @@ export interface WellnessScoreBreakdown {
   habits: number;  // 0–20
   hasMealData: boolean;
   hasFastData: boolean;
+}
+
+export interface AnalysisContext {
+  medicines: string[];
+  cyclePhase: string | null;
+  fastingHours: number;
+  weightTrend: Array<{ date: string; weight: number }>;
+  steps?: number;
+  activeCalories?: number;
+  workouts?: string;
 }

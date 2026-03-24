@@ -7,8 +7,9 @@ import BlobBackground from "@/components/BlobBackground";
 import FastingTracker from "@/components/FastingTracker";
 import HabitChecklist from "@/components/HabitChecklist";
 import MealLogger from "@/components/MealLogger";
+import HealthDataCard from "@/components/HealthDataCard";
 import WellnessScoreCard from "@/components/WellnessScoreCard";
-import { DayData, AyurvedaAnalysis } from "@/lib/types";
+import { DayData, AyurvedaAnalysis, WeightLossAnalysis, AnalysisContext } from "@/lib/types";
 import {
   calcWellnessScore,
   calcOvernightFastHours,
@@ -38,7 +39,16 @@ const EMPTY_DAY = (date: string): DayData => ({
   meal2: "",
   meal3: "",
   snacks: "",
+  weight: null,
+  cyclePhase: null,
+  periodStart: false,
+  sleepHours: null,
+  steps: null,
+  activeCalories: null,
+  restingHeartRate: null,
+  workouts: null,
   analysisJson: null,
+  weightLossAnalysisJson: null,
   wellnessScore: null,
 });
 
@@ -50,7 +60,6 @@ async function patchSection(date: string, fields: Partial<DayData>): Promise<{ i
   });
   const json = await res.json();
   if (!res.ok) {
-    // Include Notion error code if present for easier debugging
     const detail = json.detail;
     const msg = [
       json.error || "Save failed",
@@ -58,9 +67,7 @@ async function patchSection(date: string, fields: Partial<DayData>): Promise<{ i
       detail?.notionBody?.message && detail.notionBody.message !== json.error
         ? detail.notionBody.message
         : null,
-    ]
-      .filter(Boolean)
-      .join(" ");
+    ].filter(Boolean).join(" ");
     throw new Error(msg);
   }
   return json.data ?? {};
@@ -81,22 +88,23 @@ export default function DayViewContent() {
   const [loading, setLoading] = useState(true);
   const [prevLastMealTime, setPrevLastMealTime] = useState("");
   const [prevLastMealLoaded, setPrevLastMealLoaded] = useState(false);
+  const [weightTrend, setWeightTrend] = useState<Array<{ date: string; weight: number }>>([]);
 
-  // Always-current ref — never stale inside callbacks
   const dayDataRef = useRef<DayData>(dayData);
 
-  // ── Per-section dirty state ─────────────────────────────────────────────────
+  // ── Per-section dirty state ────────────────────────────────────────────────
   const [dirtyFasting, setDirtyFasting] = useState(false);
+  const [dirtyHealth, setDirtyHealth] = useState(false);
   const [dirtyHabits, setDirtyHabits] = useState(false);
   const [dirtyMeals, setDirtyMeals] = useState(false);
-  const isDirty = dirtyFasting || dirtyHabits || dirtyMeals;
+  const isDirty = dirtyFasting || dirtyHealth || dirtyHabits || dirtyMeals;
 
-  // ── Per-section save status ─────────────────────────────────────────────────
+  // ── Per-section save status ────────────────────────────────────────────────
   const [fastingSaveStatus, setFastingSaveStatus] = useState<SectionSaveStatus>("idle");
+  const [healthSaveStatus, setHealthSaveStatus] = useState<SectionSaveStatus>("idle");
   const [habitsSaveStatus, setHabitsSaveStatus] = useState<SectionSaveStatus>("idle");
   const [mealsSaveStatus, setMealsSaveStatus] = useState<SectionSaveStatus>("idle");
 
-  // ── Save error messages (shown in a banner) ──────────────────────────────────
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const weekDates = getWeekDates(new Date(activeDate + "T00:00:00"));
@@ -107,15 +115,17 @@ export default function DayViewContent() {
     return d.toISOString().slice(0, 10);
   })();
 
-  // ── Load data on date change ────────────────────────────────────────────────
+  // ── Load data on date change ───────────────────────────────────────────────
   useEffect(() => {
     setLoading(true);
     setPrevLastMealLoaded(false);
     setPrevLastMealTime("");
     setDirtyFasting(false);
+    setDirtyHealth(false);
     setDirtyHabits(false);
     setDirtyMeals(false);
     setFastingSaveStatus("idle");
+    setHealthSaveStatus("idle");
     setHabitsSaveStatus("idle");
     setMealsSaveStatus("idle");
 
@@ -141,45 +151,60 @@ export default function DayViewContent() {
       .catch(() => {})
       .finally(() => setPrevLastMealLoaded(true));
 
+    // Fetch week weight trend for analysis context
+    const weekStart = weekDates[0];
+    const weekEnd = weekDates[6];
+    fetch(`/api/notion?start=${weekStart}&end=${weekEnd}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.data) {
+          const trend = (json.data as DayData[])
+            .filter((d) => d.weight != null)
+            .map((d) => ({ date: d.date, weight: d.weight! }));
+          setWeightTrend(trend);
+        }
+      })
+      .catch(() => {});
+
     Promise.all([todayFetch, yesterdayFetch]).finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDate, yesterday]);
 
-  // ── Beforeunload warning ────────────────────────────────────────────────────
+  // ── Beforeunload warning ───────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (isDirty) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
+      if (isDirty) { e.preventDefault(); e.returnValue = ""; }
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
-  // ── Navigation with unsaved-changes check ───────────────────────────────────
+  // ── Navigation with unsaved-changes check ─────────────────────────────────
   function navigateToDate(date: string) {
     if (isDirty) {
-      const ok = window.confirm(
-        "You have unsaved changes. Leave without saving?"
-      );
-      if (!ok) return;
+      if (!window.confirm("You have unsaved changes. Leave without saving?")) return;
     }
     setDirtyFasting(false);
+    setDirtyHealth(false);
     setDirtyHabits(false);
     setDirtyMeals(false);
     router.replace(`/day?date=${date}`);
   }
 
-  // ── Local field updaters (no auto-save) ────────────────────────────────────
-  const updateFastingField = useCallback(
-    (field: "firstMealTime" | "lastMealTime", val: string) => {
-      const next = { ...dayDataRef.current, [field]: val };
-      dayDataRef.current = next;
-      setDayData(next);
-      setDirtyFasting(true);
-    },
-    []
-  );
+  // ── Local field updaters ───────────────────────────────────────────────────
+  const updateFastingField = useCallback((field: "firstMealTime" | "lastMealTime", val: string) => {
+    const next = { ...dayDataRef.current, [field]: val };
+    dayDataRef.current = next;
+    setDayData(next);
+    setDirtyFasting(true);
+  }, []);
+
+  const updateHealthField = useCallback((key: keyof DayData, val: any) => {
+    const next = { ...dayDataRef.current, [key]: val };
+    dayDataRef.current = next;
+    setDayData(next);
+    setDirtyHealth(true);
+  }, []);
 
   const updateHabitField = useCallback((key: keyof DayData, val: boolean) => {
     const next = { ...dayDataRef.current, [key]: val };
@@ -209,9 +234,40 @@ export default function DayViewContent() {
     setDirtyMeals(true);
   }, []);
 
-  // ── Per-section save functions ──────────────────────────────────────────────
+  const updateWeightLossAnalysis = useCallback((result: WeightLossAnalysis) => {
+    const next = { ...dayDataRef.current, weightLossAnalysisJson: result };
+    dayDataRef.current = next;
+    setDayData(next);
+    setDirtyMeals(true);
+  }, []);
+
+  // ── Analysis context builder ───────────────────────────────────────────────
   const overnightFastHours = calcOvernightFastHours(prevLastMealTime, dayData.firstMealTime);
 
+  function buildAnalysisContext(): AnalysisContext {
+    const data = dayDataRef.current;
+    const medicines: string[] = [];
+    if (data.kashayamMorning) medicines.push("Kashayam (morning)");
+    if (data.kashayamEvening) medicines.push("Kashayam (evening)");
+    if (data.wellnessTabletMorning) medicines.push("Wellness Tablet (morning)");
+    if (data.wellnessTabletEvening) medicines.push("Wellness Tablet (evening)");
+    if (data.greenSupplementMorning) medicines.push("Green Supplement (morning)");
+    if (data.greenSupplementEvening) medicines.push("Green Supplement (evening)");
+    if (data.psylliumHuskMorning) medicines.push("Psyllium Husk (morning)");
+    if (data.psylliumHuskEvening) medicines.push("Psyllium Husk (evening)");
+    if (data.triphalaChurnam) medicines.push("Triphala Churnam");
+    return {
+      medicines,
+      cyclePhase: data.cyclePhase ?? null,
+      fastingHours: overnightFastHours,
+      weightTrend,
+      steps: data.steps ?? undefined,
+      activeCalories: data.activeCalories ?? undefined,
+      workouts: data.workouts ?? undefined,
+    };
+  }
+
+  // ── Per-section save functions ─────────────────────────────────────────────
   const saveFasting = useCallback(async () => {
     setFastingSaveStatus("saving");
     try {
@@ -231,12 +287,39 @@ export default function DayViewContent() {
       setFastingSaveStatus("saved");
       setTimeout(() => setFastingSaveStatus("idle"), 2000);
     } catch (err: any) {
-      console.error("Fasting save error:", err);
       setSaveError(err.message || "Fasting save failed");
       setFastingSaveStatus("error");
       setTimeout(() => setFastingSaveStatus("idle"), 3000);
     }
   }, [activeDate, prevLastMealTime]);
+
+  const saveHealth = useCallback(async () => {
+    setHealthSaveStatus("saving");
+    try {
+      const data = dayDataRef.current;
+      const saved = await patchSection(activeDate, {
+        weight: data.weight,
+        cyclePhase: data.cyclePhase,
+        periodStart: data.periodStart,
+        sleepHours: data.sleepHours,
+        steps: data.steps,
+        activeCalories: data.activeCalories,
+        restingHeartRate: data.restingHeartRate,
+        workouts: data.workouts,
+      });
+      if (saved.id) {
+        dayDataRef.current = { ...dayDataRef.current, id: saved.id };
+        setDayData((prev) => ({ ...prev, id: saved.id }));
+      }
+      setDirtyHealth(false);
+      setHealthSaveStatus("saved");
+      setTimeout(() => setHealthSaveStatus("idle"), 2000);
+    } catch (err: any) {
+      setSaveError(err.message || "Health save failed");
+      setHealthSaveStatus("error");
+      setTimeout(() => setHealthSaveStatus("idle"), 3000);
+    }
+  }, [activeDate]);
 
   const saveHabits = useCallback(async () => {
     setHabitsSaveStatus("saving");
@@ -265,7 +348,6 @@ export default function DayViewContent() {
       setHabitsSaveStatus("saved");
       setTimeout(() => setHabitsSaveStatus("idle"), 2000);
     } catch (err: any) {
-      console.error("Habits save error:", err);
       setSaveError(err.message || "Habits save failed");
       setHabitsSaveStatus("error");
       setTimeout(() => setHabitsSaveStatus("idle"), 3000);
@@ -285,6 +367,7 @@ export default function DayViewContent() {
         meal3: data.meal3,
         snacks: data.snacks,
         analysisJson: data.analysisJson,
+        weightLossAnalysisJson: data.weightLossAnalysisJson,
         wellnessScore: score.total,
       });
       if (saved.id) {
@@ -295,14 +378,13 @@ export default function DayViewContent() {
       setMealsSaveStatus("saved");
       setTimeout(() => setMealsSaveStatus("idle"), 2000);
     } catch (err: any) {
-      console.error("Meals save error:", err);
       setSaveError(err.message || "Meals save failed");
       setMealsSaveStatus("error");
       setTimeout(() => setMealsSaveStatus("idle"), 3000);
     }
   }, [activeDate, prevLastMealTime]);
 
-  // ── Clear handlers (immediate Notion wipe with confirmation) ────────────────
+  // ── Clear handlers ─────────────────────────────────────────────────────────
   const clearFasting = useCallback(async () => {
     if (!window.confirm("Clear fasting times for this day? This cannot be undone.")) return;
     const next = { ...dayDataRef.current, firstMealTime: "", lastMealTime: "" };
@@ -321,19 +403,36 @@ export default function DayViewContent() {
     }
   }, [activeDate]);
 
+  const clearHealth = useCallback(async () => {
+    if (!window.confirm("Clear all health data for this day? This cannot be undone.")) return;
+    const cleared = {
+      weight: null, cyclePhase: null, periodStart: false,
+      sleepHours: null, steps: null, activeCalories: null,
+      restingHeartRate: null, workouts: null,
+    };
+    const next = { ...dayDataRef.current, ...cleared };
+    dayDataRef.current = next;
+    setDayData(next);
+    setDirtyHealth(false);
+    setHealthSaveStatus("saving");
+    try {
+      await patchSection(activeDate, cleared);
+      setHealthSaveStatus("saved");
+      setTimeout(() => setHealthSaveStatus("idle"), 1500);
+    } catch (err: any) {
+      setSaveError(err.message || "Clear health failed");
+      setHealthSaveStatus("error");
+      setTimeout(() => setHealthSaveStatus("idle"), 3000);
+    }
+  }, [activeDate]);
+
   const clearHabits = useCallback(async () => {
     if (!window.confirm("Clear all habits for this day? This cannot be undone.")) return;
     const cleared = {
-      morningRitual: false,
-      kashayamMorning: false,
-      kashayamEvening: false,
-      wellnessTabletMorning: false,
-      wellnessTabletEvening: false,
-      greenSupplementMorning: false,
-      greenSupplementEvening: false,
-      psylliumHuskMorning: false,
-      psylliumHuskEvening: false,
-      triphalaChurnam: false,
+      morningRitual: false, kashayamMorning: false, kashayamEvening: false,
+      wellnessTabletMorning: false, wellnessTabletEvening: false,
+      greenSupplementMorning: false, greenSupplementEvening: false,
+      psylliumHuskMorning: false, psylliumHuskEvening: false, triphalaChurnam: false,
     };
     const next = { ...dayDataRef.current, ...cleared };
     dayDataRef.current = next;
@@ -353,7 +452,10 @@ export default function DayViewContent() {
 
   const clearMeals = useCallback(async () => {
     if (!window.confirm("Clear all meals and analysis for this day? This cannot be undone.")) return;
-    const cleared = { meal1: "", meal2: "", meal3: "", snacks: "", analysisJson: null };
+    const cleared = {
+      meal1: "", meal2: "", meal3: "", snacks: "",
+      analysisJson: null, weightLossAnalysisJson: null,
+    };
     const next = { ...dayDataRef.current, ...cleared };
     dayDataRef.current = next;
     setDayData(next);
@@ -370,7 +472,7 @@ export default function DayViewContent() {
     }
   }, [activeDate]);
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   const scoreBreakdown = calcWellnessScore(dayData, overnightFastHours);
 
   return (
@@ -396,18 +498,13 @@ export default function DayViewContent() {
             </motion.span>
           </button>
           <div className="flex-1">
-            <h1
-              className="text-lg font-extrabold text-gray-900 leading-tight"
-              suppressHydrationWarning
-            >
+            <h1 className="text-lg font-extrabold text-gray-900 leading-tight" suppressHydrationWarning>
               {formatDateFull(activeDate)}
             </h1>
             {today && activeDate === today && (
               <span className="text-xs font-bold text-pink-500">Today</span>
             )}
           </div>
-
-          {/* Unsaved changes indicator */}
           {isDirty && (
             <motion.span
               initial={{ opacity: 0, scale: 0.9 }}
@@ -434,13 +531,11 @@ export default function DayViewContent() {
                 className={`
                   flex-shrink-0 w-11 flex flex-col items-center py-2.5 px-1.5 rounded-2xl cursor-pointer
                   transition-all duration-200 border-2
-                  ${
-                    isActive
-                      ? "border-pink-500 bg-gradient-to-b from-pink-500 to-pink-400 text-white shadow-pink"
-                      : isToday
-                      ? "border-pink-200 bg-pink-50 text-pink-600"
-                      : "border-transparent bg-white text-gray-500 shadow-card"
-                  }
+                  ${isActive
+                    ? "border-pink-500 bg-gradient-to-b from-pink-500 to-pink-400 text-white shadow-pink"
+                    : isToday
+                    ? "border-pink-200 bg-pink-50 text-pink-600"
+                    : "border-transparent bg-white text-gray-500 shadow-card"}
                 `}
               >
                 <span className="text-[10px] font-semibold opacity-80">{dayLabel}</span>
@@ -462,18 +557,13 @@ export default function DayViewContent() {
               <p className="text-xs font-bold text-red-700 mb-0.5">Save failed</p>
               <p className="text-xs text-red-600 break-words">{saveError}</p>
             </div>
-            <button
-              onClick={() => setSaveError(null)}
-              className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
-            >
-              ×
-            </button>
+            <button onClick={() => setSaveError(null)} className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0">×</button>
           </motion.div>
         )}
 
         {loading ? (
           <div className="space-y-4">
-            {[1, 2, 3, 4].map((i) => (
+            {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="bg-white rounded-2xl h-36 animate-pulse border border-pink-50" />
             ))}
           </div>
@@ -494,6 +584,22 @@ export default function DayViewContent() {
                 saveStatus={fastingSaveStatus}
               />
 
+              <HealthDataCard
+                weight={dayData.weight ?? null}
+                cyclePhase={dayData.cyclePhase ?? null}
+                periodStart={dayData.periodStart ?? false}
+                sleepHours={dayData.sleepHours ?? null}
+                steps={dayData.steps ?? null}
+                activeCalories={dayData.activeCalories ?? null}
+                restingHeartRate={dayData.restingHeartRate ?? null}
+                workouts={dayData.workouts ?? null}
+                onChange={updateHealthField}
+                onSave={saveHealth}
+                onClear={clearHealth}
+                isDirty={dirtyHealth}
+                saveStatus={healthSaveStatus}
+              />
+
               <HabitChecklist
                 data={dayData}
                 mealCount={dayData.mealCount}
@@ -511,9 +617,12 @@ export default function DayViewContent() {
                 meal3={dayData.meal3}
                 snacks={dayData.snacks}
                 analysis={dayData.analysisJson}
+                weightLossAnalysis={dayData.weightLossAnalysisJson}
+                analysisContext={buildAnalysisContext()}
                 onMealChange={updateMealField}
                 onMealCountChange={updateMealCount}
                 onAnalysis={updateAnalysis}
+                onWeightLossAnalysis={updateWeightLossAnalysis}
                 onSave={saveMeals}
                 onClear={clearMeals}
                 isDirty={dirtyMeals}

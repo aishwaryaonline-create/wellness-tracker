@@ -10,6 +10,7 @@ const rt = (val: string) => {
   return { rich_text: [{ text: { content } }] };
 };
 const num = (val: number) => ({ number: val });
+const numOrNull = (val: number | null | undefined) => ({ number: val ?? null });
 const dateprop = (val: string) => ({ date: { start: val } });
 
 function getRichText(props: any, key: string): string {
@@ -24,11 +25,14 @@ function parseMealCount(val: any): 1 | 2 | 3 {
 
 function mapPage(page: any, fallbackDate: string): DayData {
   const p = page.properties;
+
   const analysisRaw = getRichText(p, "Analysis JSON");
   let analysisJson = null;
-  try {
-    if (analysisRaw) analysisJson = JSON.parse(analysisRaw);
-  } catch {}
+  try { if (analysisRaw) analysisJson = JSON.parse(analysisRaw); } catch {}
+
+  const wlRaw = getRichText(p, "Weight Loss Analysis JSON");
+  let weightLossAnalysisJson = null;
+  try { if (wlRaw) weightLossAnalysisJson = JSON.parse(wlRaw); } catch {}
 
   return {
     id: page.id,
@@ -50,7 +54,18 @@ function mapPage(page: any, fallbackDate: string): DayData {
     meal2: getRichText(p, "Meal 2"),
     meal3: getRichText(p, "Meal 3"),
     snacks: getRichText(p, "Snacks"),
+    // Health metrics
+    weight: p["Weight"]?.number ?? null,
+    cyclePhase: getRichText(p, "Cycle Phase") || null,
+    periodStart: getCheckbox(p, "Period Start"),
+    sleepHours: p["Sleep Hours"]?.number ?? null,
+    steps: p["Steps"]?.number ?? null,
+    activeCalories: p["Active Calories"]?.number ?? null,
+    restingHeartRate: p["Resting Heart Rate"]?.number ?? null,
+    workouts: getRichText(p, "Workouts") || null,
+    // Analysis
     analysisJson,
+    weightLossAnalysisJson,
     wellnessScore: p["Wellness Score"]?.number ?? null,
   };
 }
@@ -80,11 +95,27 @@ function buildProperties(fields: Partial<DayData>): Record<string, any> {
   if (fields.meal2 !== undefined) props["Meal 2"] = rt(fields.meal2);
   if (fields.meal3 !== undefined) props["Meal 3"] = rt(fields.meal3);
   if (fields.snacks !== undefined) props["Snacks"] = rt(fields.snacks);
+  // Health metrics
+  if ("weight" in fields) props["Weight"] = numOrNull(fields.weight);
+  if (fields.cyclePhase !== undefined) props["Cycle Phase"] = rt(fields.cyclePhase || "");
+  if (fields.periodStart !== undefined) props["Period Start"] = cb(fields.periodStart);
+  if ("sleepHours" in fields) props["Sleep Hours"] = numOrNull(fields.sleepHours);
+  if ("steps" in fields) props["Steps"] = numOrNull(fields.steps);
+  if ("activeCalories" in fields) props["Active Calories"] = numOrNull(fields.activeCalories);
+  if ("restingHeartRate" in fields) props["Resting Heart Rate"] = numOrNull(fields.restingHeartRate);
+  if (fields.workouts !== undefined) props["Workouts"] = rt(fields.workouts || "");
+  // Analysis
   if ("analysisJson" in fields) {
     const analysisStr = fields.analysisJson
       ? JSON.stringify(fields.analysisJson).slice(0, 1990)
       : "";
     props["Analysis JSON"] = rt(analysisStr);
+  }
+  if ("weightLossAnalysisJson" in fields) {
+    const wlStr = fields.weightLossAnalysisJson
+      ? JSON.stringify(fields.weightLossAnalysisJson).slice(0, 1990)
+      : "";
+    props["Weight Loss Analysis JSON"] = rt(wlStr);
   }
   if (fields.wellnessScore !== undefined) props["Wellness Score"] = num(fields.wellnessScore ?? 0);
 
@@ -110,16 +141,10 @@ export async function upsertDayData(data: DayData): Promise<DayData> {
   const properties = buildProperties(data);
 
   if (existing.results.length > 0) {
-    const page = await notion.pages.update({
-      page_id: existing.results[0].id,
-      properties,
-    });
+    const page = await notion.pages.update({ page_id: existing.results[0].id, properties });
     return { ...data, id: page.id };
   } else {
-    const page = await notion.pages.create({
-      parent: { database_id: DATABASE_ID },
-      properties,
-    });
+    const page = await notion.pages.create({ parent: { database_id: DATABASE_ID }, properties });
     return { ...data, id: page.id };
   }
 }
@@ -128,10 +153,7 @@ export async function upsertDayData(data: DayData): Promise<DayData> {
  * Partial update — only touches the fields you pass.
  * Other fields in Notion are left completely unchanged.
  */
-export async function patchDayData(
-  date: string,
-  fields: Partial<DayData>
-): Promise<DayData> {
+export async function patchDayData(date: string, fields: Partial<DayData>): Promise<DayData> {
   const existing = await notion.databases.query({
     database_id: DATABASE_ID,
     filter: { property: "Date", date: { equals: date } },
@@ -140,12 +162,8 @@ export async function patchDayData(
   const properties = buildProperties(fields);
 
   if (existing.results.length > 0) {
-    await notion.pages.update({
-      page_id: existing.results[0].id,
-      properties,
-    });
+    await notion.pages.update({ page_id: existing.results[0].id, properties });
   } else {
-    // First time saving this day — create the row with date + patched fields
     await notion.pages.create({
       parent: { database_id: DATABASE_ID },
       properties: {
